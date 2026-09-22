@@ -1,0 +1,406 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  STAFF
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum BusinessStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum BookingStatus {
+  CONFIRMED
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum BookingSource {
+  DIRECT
+  WEBSITE
+  WHATSAPP
+  PHONE
+  WALK_IN
+  OTHER
+}
+
+enum TriggerType {
+  BOOKING_CREATED
+  JOURNEY_DATE
+  BOOKING_CANCELLED
+}
+
+enum MessageType {
+  BOOKING_CONFIRMATION
+  REMINDER_48H
+  REMINDER_24H
+  JOURNEY_DAY
+  BOOKING_CANCELLATION
+  CUSTOM
+}
+
+enum TemplateCategory {
+  BOOKING
+  REMINDER
+  FEEDBACK
+  MARKETING
+  GENERAL
+}
+
+enum TemplateStatus {
+  ACTIVE
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum MessageStatus {
+  SCHEDULED
+  PROCESSING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  CANCELLED
+}
+
+enum WhatsAppAccountStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+model Business {
+  id        String         @id @default(uuid())
+  name      String
+  logo      String?
+  email     String?
+  phone     String?
+  timezone  String         @default("Asia/Kolkata")
+  currency  String         @default("INR")
+  status    BusinessStatus @default(ACTIVE)
+
+  users           User[]
+  customers       Customer[]
+  bookings        Booking[]
+  automationRules AutomationRule[]
+  templates       MessageTemplate[]
+  scheduledMessages ScheduledMessage[]
+  messageLogs     MessageLog[]
+  whatsappAccounts WhatsAppAccount[]
+  auditLogs       AuditLog[]
+  setting         BusinessSetting?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+}
+
+model User {
+  id           String     @id @default(uuid())
+  businessId   String
+  name         String
+  email        String     @unique
+  phone        String?
+  passwordHash String
+  role         Role       @default(STAFF)
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+
+  business       Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bookings       Booking[]
+  refreshTokens  RefreshToken[]
+  auditLogs      AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([businessId, role])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ip        String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model BusinessSetting {
+  id                 String   @id @default(uuid())
+  businessId         String   @unique
+  currency           String   @default("INR")
+  timezone           String   @default("Asia/Kolkata")
+  defaultAirline     String?
+  defaultTerminal    String?
+  defaultCurrency    String   @default("INR")
+  notifyConfirmation Boolean  @default(true)
+  notify48h          Boolean  @default(true)
+  notify24h          Boolean  @default(true)
+  notifyJourneyDay   Boolean  @default(true)
+  notifyCancellation Boolean  @default(true)
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Customer {
+  id         String         @id @default(uuid())
+  businessId String
+  name       String
+  phone      String
+  email      String?
+  status     CustomerStatus @default(ACTIVE)
+
+  business  Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bookings  Booking[]
+  messages  ScheduledMessage[]
+  logs      MessageLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessId, phone])
+  @@index([businessId])
+  @@index([businessId, phone])
+  @@index([businessId, name])
+}
+
+model Booking {
+  id              String        @id @default(uuid())
+  businessId      String
+  customerId      String
+  pnr             String
+  referenceNumber String?
+
+  flightNumber String
+  airline      String
+
+  fromAirport String
+  fromCity    String
+  toAirport   String
+  toCity      String
+
+  departureDate DateTime
+  departureTime String
+  terminal      String?
+
+  status BookingStatus @default(CONFIRMED)
+  source BookingSource @default(DIRECT)
+
+  amount   Float?
+  currency String?
+
+  createdBy String
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  creator  User     @relation(fields: [createdBy], references: [id])
+
+  scheduledMessages ScheduledMessage[]
+  messageLogs       MessageLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessId, pnr])
+  @@index([businessId])
+  @@index([businessId, departureDate])
+  @@index([businessId, status])
+  @@index([businessId, customerId])
+  @@index([departureDate])
+}
+
+model AutomationRule {
+  id            String      @id @default(uuid())
+  businessId    String
+  name          String
+  description   String?
+  triggerType   TriggerType
+  messageType   MessageType
+  offsetMinutes Int
+  templateId    String
+  active        Boolean     @default(true)
+
+  business Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  template MessageTemplate  @relation(fields: [templateId], references: [id])
+  messages ScheduledMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId, active])
+  @@index([businessId, triggerType])
+}
+
+model MessageTemplate {
+  id                   String         @id @default(uuid())
+  businessId           String
+  name                 String
+  description          String?
+  category             TemplateCategory @default(GENERAL)
+  content              String
+  whatsappTemplateName String?
+  status               TemplateStatus @default(DRAFT)
+  language             String         @default("en")
+  variables            String[]       @default([])
+
+  business   Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  rules      AutomationRule[]
+  messages   ScheduledMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId, status])
+  @@index([businessId])
+}
+
+model ScheduledMessage {
+  id             String        @id @default(uuid())
+  businessId     String
+  bookingId      String
+  customerId     String
+  templateId     String
+  automationRuleId String?
+
+  messageType MessageType
+  name        String
+
+  scheduledAt DateTime
+  status      MessageStatus @default(SCHEDULED)
+
+  attempts   Int       @default(0)
+  sentAt     DateTime?
+  deliveredAt DateTime?
+  readAt     DateTime?
+  failedAt   DateTime?
+
+  lastError String?
+
+  bullmqJobId  String?
+  waMessageId  String?
+  renderedContent String?
+
+  business  Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  booking   Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  customer  Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  template  MessageTemplate @relation(fields: [templateId], references: [id])
+  rule      AutomationRule? @relation(fields: [automationRuleId], references: [id], onDelete: SetNull)
+  logs      MessageLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId, scheduledAt])
+  @@index([businessId, status])
+  @@index([bookingId, automationRuleId])
+  @@index([status, scheduledAt])
+  @@index([waMessageId])
+}
+
+model MessageLog {
+  id              String        @id @default(uuid())
+  businessId      String
+  scheduledMessageId String?
+  bookingId       String?
+  customerId      String
+
+  direction     String        @default("OUTBOUND")
+  messageType   MessageType?
+  status        MessageStatus
+  toPhone       String
+  fromPhone     String?
+  templateName  String?
+  content       String?
+  waMessageId   String?       @unique
+  errorMessage  String?
+  errorCode     String?
+  sentAt        DateTime?
+  deliveredAt   DateTime?
+  readAt        DateTime?
+
+  business Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  scheduledMessage ScheduledMessage? @relation(fields: [scheduledMessageId], references: [id], onDelete: SetNull)
+  booking  Booking?         @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  customer Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId, createdAt])
+  @@index([businessId, status])
+  @@index([waMessageId])
+  @@index([customerId])
+  @@index([bookingId])
+}
+
+model WhatsAppAccount {
+  id                 String                @id @default(uuid())
+  businessId         String
+  phoneNumberId      String
+  wabaId             String?
+  displayPhoneNumber String?
+  status             WhatsAppAccountStatus @default(PENDING)
+  accessTokenRef     String?
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  businessId String
+  userId     String?
+  action     String
+  entity     String
+  entityId   String?
+  metadata   Json?
+  ip         String?
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([businessId, createdAt])
+  @@index([businessId, entity])
+}

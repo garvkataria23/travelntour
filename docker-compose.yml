@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flyconnect-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flyconnect
+      POSTGRES_PASSWORD: flyconnect
+      POSTGRES_DB: flyconnect
+    ports:
+      - "5432:5432"
+    volumes:
+      - flyconnect_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flyconnect -d flyconnect"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: flyconnect-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - flyconnect_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flyconnect-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    ports:
+      - "4000:4000"
+
+volumes:
+  flyconnect_pgdata:
+  flyconnect_redisdata:

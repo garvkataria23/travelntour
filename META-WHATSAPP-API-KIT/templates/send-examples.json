@@ -1,0 +1,91 @@
+{
+  "note": "Ready-to-send payloads. POST to https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages with Bearer {META_WHATSAPP_TOKEN}. Matches what the app builds in whatsapp_template_payload/send_whatsapp_message.",
+
+  "template_send_no_parameters": {
+    "messaging_product": "whatsapp",
+    "to": "919876543210",
+    "type": "template",
+    "template": {
+      "name": "appointment_reminder",
+      "language": { "code": "en" },
+      "components": []
+    }
+  },
+
+  "template_send_with_body_parameters": {
+    "messaging_product": "whatsapp",
+    "to": "919876543210",
+    "type": "template",
+    "template": {
+      "name": "appointment_reminder",
+      "language": { "code": "en" },
+      "components": [
+        {
+          "type": "body",
+          "parameters": [
+            { "type": "text", "text": "Aura Shine" },
+            { "type": "text", "text": "2026-09-25 10:30" },
+            { "type": "text", "text": "Hair Spa" }
+          ]
+        }
+      ]
+    }
+  },
+
+  "text_send": {
+    "messaging_product": "whatsapp",
+    "recipient_type": "individual",
+    "to": "919876543210",
+    "type": "text",
+    "text": { "body": "Your appointment is confirmed." }
+  },
+
+  "interactive_buttons_send": {
+    "messaging_product": "whatsapp",
+    "to": "919876543210",
+    "type": "interactive",
+    "interactive": {
+      "type": "button",
+      "body": { "text": "Would you like to book again?" },
+      "action": {
+        "buttons": [
+          { "type": "reply", "reply": { "id": "book_yes", "title": "Book" } },
+          { "type": "reply", "reply": { "id": "book_no", "title": "No" } }
+        ]
+      }
+    }
+  },
+
+  "interactive_list_send_branch_picker": {
+    "messaging_product": "whatsapp",
+    "to": "919876543210",
+    "type": "interactive",
+    "interactive": {
+      "type": "list",
+      "header": { "type": "text", "text": "Select branch" },
+      "body": { "text": "Which branch should we book you at?" },
+      "action": {
+        "button": "Select",
+        "sections": [
+          {
+            "title": "Branches",
+            "rows": [
+              { "id": "br-1", "title": "Aura Shine Baner", "description": "7:30 AM - 9 PM" },
+              { "id": "br-2", "title": "Aura Shine Koregaon", "description": "9 AM - 8:30 PM" }
+            ]
+          }
+        ]
+      }
+    }
+  },
+
+  "reply_to_user_inbound": {
+    "note": "Only valid inside the 24h window opened by the user's inbound message.",
+    "messaging_product": "whatsapp",
+    "recipient_type": "individual",
+    "context": { "message_id": "wamid.INBOUND_MSG_ID" },
+    "to": "919876543210",
+    "type": "text",
+    "text": { "body": "Great, what service do you need?" }
+  }
+}

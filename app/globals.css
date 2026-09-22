@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #e9f4ff;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.city-silhouette {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 92px;
+  background:
+    linear-gradient(#dce5f0, #dce5f0) 10% 60% / 18px 42px no-repeat,
+    linear-gradient(#dce5f0, #dce5f0) 15% 38% / 34px 62px no-repeat,
+    linear-gradient(#dce5f0, #dce5f0) 22% 50% / 12px 48px no-repeat,
+    linear-gradient(#dce5f0, #dce5f0) 30% 45% / 22px 54px no-repeat,
+    linear-gradient(#dce5f0, #dce5f0) 41% 58% / 16px 38px no-repeat,
+    linear-gradient(#dce5f0, #dce5f0) 58% 32% / 10px 66px no-repeat,
+    linear-gradient(#dce5f0, #dce5f0) 70% 62% / 50px 32px no-repeat,
+    linear-gradient(#dce5f0, #dce5f0) 86% 44% / 72px 52px no-repeat,
+    linear-gradient(#dce5f0, #dce5f0) 98% 35% / 90px 66px no-repeat;
+  opacity: 0.72;
+}
+
+.city-silhouette::before,
+.city-silhouette::after {
+  content: "";
+  position: absolute;
+  bottom: 54px;
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-bottom: 22px solid #dce5f0;
+}
+
+.city-silhouette::before {
+  left: 12%;
+}
+
+.city-silhouette::after {
+  right: 16%;
+}
+
+@media (max-width: 640px) {
+  .city-silhouette {
+    opacity: 0.38;
+  }
+}
+
+@media (min-width: 1024px) {
+  .flyconnect-app header {
+    height: 54px;
+  }
+
+  .flyconnect-app main {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .flyconnect-app .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0.75rem;
+  }
+
+  .flyconnect-app aside nav {
+    margin-top: 0;
+  }
+
+  .flyconnect-app aside nav a {
+    height: 42px;
+    padding-top: 9px;
+    padding-bottom: 9px;
+  }
+
+  .flyconnect-app table th,
+  .flyconnect-app table td {
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+  }
+
+  .flyconnect-app section.rounded-xl,
+  .flyconnect-app article.rounded-xl,
+  .flyconnect-app aside.rounded-xl {
+    border-radius: 0.65rem;
+  }
+
+  .flyconnect-app .rounded-xl.p-4,
+  .flyconnect-app .rounded-xl.p-5,
+  .flyconnect-app article.rounded-xl.p-4,
+  .flyconnect-app section.rounded-xl.p-4,
+  .flyconnect-app aside.rounded-xl.p-4 {
+    padding-top: 0.8rem;
+    padding-bottom: 0.8rem;
+  }
+
+  .flyconnect-app .h-14.w-14 {
+    height: 3rem;
+    width: 3rem;
+  }
+
+  .flyconnect-app .h-14.w-14 svg {
+    height: 1.5rem;
+    width: 1.5rem;
+  }
+
+  .flyconnect-app .text-\[27px\] {
+    font-size: 24px;
+  }
+}
