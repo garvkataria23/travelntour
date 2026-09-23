@@ -51,8 +51,8 @@ export default function DashboardPage() {
   return (
     <AppShell>
       <div className="space-y-4">
-        <section className="relative overflow-hidden rounded-xl bg-[url('/assets/dashboard-hero.png')] bg-cover bg-center px-7 py-9 text-white shadow-sm md:px-9">
-          <div className="absolute inset-0 bg-blue-950/10" />
+        <section className="relative overflow-hidden rounded-xl bg-gradient-to-r from-[#0e7ae4] via-[#1d8af3] to-[#4aa6ff] px-7 py-9 text-white shadow-sm md:px-9">
+          <div className="absolute inset-0 bg-white/10" />
           <div className="relative z-10">
             <p className="text-2xl font-light">{greeting},</p>
             <h1 className="mt-1 text-[42px] font-extrabold leading-tight tracking-[-0.04em]">{firstName} 👋</h1>
