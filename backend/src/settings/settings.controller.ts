@@ -77,6 +77,11 @@ export class SettingsController {
           notify24h: dto.notify24h ?? true,
           notifyJourneyDay: dto.notifyJourneyDay ?? true,
           notifyCancellation: dto.notifyCancellation ?? true,
+          ...(dto.gstEnabled !== undefined ? { gstEnabled: dto.gstEnabled } : {}),
+          ...(dto.gstRate !== undefined ? { gstRate: dto.gstRate } : {}),
+          ...(dto.gstin !== undefined ? { gstin: dto.gstin } : {}),
+          ...(dto.invoicePrefix !== undefined ? { invoicePrefix: dto.invoicePrefix } : {}),
+          ...(dto.nextInvoiceNo !== undefined ? { nextInvoiceNo: dto.nextInvoiceNo } : {}),
         },
         update: {
           ...(dto.timezone !== undefined ? { timezone: dto.timezone } : {}),
@@ -86,6 +91,11 @@ export class SettingsController {
           notify24h: dto.notify24h,
           notifyJourneyDay: dto.notifyJourneyDay,
           notifyCancellation: dto.notifyCancellation,
+          ...(dto.gstEnabled !== undefined ? { gstEnabled: dto.gstEnabled } : {}),
+          ...(dto.gstRate !== undefined ? { gstRate: dto.gstRate } : {}),
+          ...(dto.gstin !== undefined ? { gstin: dto.gstin } : {}),
+          ...(dto.invoicePrefix !== undefined ? { invoicePrefix: dto.invoicePrefix } : {}),
+          ...(dto.nextInvoiceNo !== undefined ? { nextInvoiceNo: dto.nextInvoiceNo } : {}),
         },
       }),
     ]);

@@ -2,14 +2,28 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { AlertTriangle, Bell, Check, ChevronDown, Clock3, Command, LogOut, Menu, Plane, Search, Settings, Users, X } from "lucide-react";
+import { AlertTriangle, BarChart3, Bell, CalendarCheck, Check, ChevronDown, Clock3, Command, FileText, Home, LogOut, Menu, MessageCircle, Plane, Plus, Search, Settings, Users, Wallet, Workflow, X, type LucideIcon } from "lucide-react";
 import { ReactNode, useEffect, useRef, useState } from "react";
-import { navItems } from "@/lib/mock-data";
 import { api, clearSession, formatDate, getAccessToken, getStoredUser, type ApiUser } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 
+const NAV_ITEMS: Array<{ label: string; href: string; icon: LucideIcon }> = [
+  { label: "Dashboard", href: "/dashboard", icon: Home },
+  { label: "Bookings", href: "/bookings", icon: Plane },
+  { label: "Add Booking", href: "/bookings/add", icon: Plus },
+  { label: "Upcoming Journeys", href: "/upcoming-journeys", icon: CalendarCheck },
+  { label: "Customers", href: "/customers", icon: Users },
+  { label: "WhatsApp Messages", href: "/whatsapp-messages", icon: MessageCircle },
+  { label: "Automation", href: "/automation", icon: Settings },
+  { label: "Message Templates", href: "/message-templates", icon: FileText },
+  { label: "Reports", href: "/reports", icon: BarChart3 },
+  { label: "Expenses", href: "/expenses", icon: Wallet },
+  { label: "Settings", href: "/settings", icon: Workflow },
+];
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const [railHover, setRailHover] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [user, setUser] = useState<ApiUser | null>(null);
   const router = useRouter();
@@ -29,8 +43,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flyconnect-app min-h-screen bg-[#f4f9ff] text-[#08142e]">
-      <Sidebar open={open} onClose={() => setOpen(false)} user={user} onLogout={() => setLogoutOpen(true)} />
-      <div className="min-h-screen lg:pl-[237px]">
+      <Sidebar open={open} onClose={() => setOpen(false)} user={user} onLogout={() => setLogoutOpen(true)} expanded={railHover} onHoverChange={setRailHover} />
+      <div className={`min-h-screen transition-[padding] duration-200 ${railHover ? "lg:pl-[237px]" : "lg:pl-[76px]"}`}>
         <Topbar onMenu={() => setOpen(true)} user={user} businessName={businessName} onLogout={() => setLogoutOpen(true)} />
         <main className="px-4 py-4 sm:px-6 lg:px-5 xl:px-8">{children}</main>
       </div>
@@ -43,8 +57,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-function Sidebar({ open, onClose, user, onLogout }: { open: boolean; onClose: () => void; user: ApiUser; onLogout: () => void }) {
+function Sidebar({ open, onClose, user, onLogout, expanded, onHoverChange }: { open: boolean; onClose: () => void; user: ApiUser; onLogout: () => void; expanded: boolean; onHoverChange: (value: boolean) => void }) {
   const pathname = usePathname();
+  const full = expanded || open;
   const initials = (user.name || user.email || "?")
     .split(/\s+/)
     .map((part) => part[0])
@@ -56,45 +71,57 @@ function Sidebar({ open, onClose, user, onLogout }: { open: boolean; onClose: ()
   return (
     <>
       <div className={`fixed inset-0 z-40 bg-slate-950/50 transition lg:hidden ${open ? "opacity-100" : "pointer-events-none opacity-0"}`} onClick={onClose} />
-      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[237px] flex-col overflow-hidden bg-[#071832] text-white shadow-2xl transition-transform lg:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className="flex h-[88px] items-start justify-between px-[17px] pt-[22px]">
-          <Link href="/dashboard" className="flex items-center gap-2">
+      <aside
+        onMouseEnter={() => onHoverChange(true)}
+        onMouseLeave={() => onHoverChange(false)}
+        className={`fixed inset-y-0 left-0 z-50 flex w-[237px] flex-col overflow-hidden bg-[#071832] text-white shadow-2xl transition-[width,transform] duration-200 lg:translate-x-0 ${expanded ? "lg:w-[237px]" : "lg:w-[76px]"} ${open ? "translate-x-0" : "-translate-x-full"}`}
+      >
+        <div className={`flex h-[88px] items-start ${full ? "justify-between" : "justify-center"} px-[17px] pt-[22px]`}>
+          <Link href="/dashboard" className="flex items-center gap-2" onClick={onClose}>
             <Plane className="h-12 w-12 -rotate-45 fill-[#218bf3] stroke-[#218bf3] stroke-[1.5]" />
-            <div>
-              <div className="text-[21px] font-extrabold leading-none tracking-[-0.04em]">Fly<span className="text-[#2494ff]">Connect</span></div>
-              <div className="mt-2 text-[8px] font-bold uppercase tracking-[0.1em] text-white/75">Travel Smarter, Together</div>
-            </div>
+            {full ? (
+              <div>
+                <div className="text-[21px] font-extrabold leading-none tracking-[-0.04em]">Fly<span className="text-[#2494ff]">Connect</span></div>
+                <div className="mt-2 text-[8px] font-bold uppercase tracking-[0.1em] text-white/75">Travel Smarter, Together</div>
+              </div>
+            ) : null}
           </Link>
-          <button className="lg:hidden" onClick={onClose} type="button"><X className="h-5 w-5" /></button>
+          {full ? <button className="lg:hidden" onClick={onClose} type="button"><X className="h-5 w-5" /></button> : null}
         </div>
 
         <nav className="mt-2 space-y-[7px] px-2">
-          {navItems.map((item) => {
+          {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || (item.href === "/bookings" && pathname.startsWith("/bookings") && pathname !== "/bookings/add") || (item.href === "/bookings/add" && pathname === "/bookings/add");
             return (
-              <Link key={item.href} href={item.href} onClick={onClose} className={`group relative flex h-12 items-center gap-4 rounded-lg px-4 py-[13px] text-[16px] transition ${active ? "bg-[#213965] text-white" : "text-[#d8e3f4] hover:bg-white/8 hover:text-white"}`}>
+              <Link key={item.href} href={item.href} onClick={onClose} className={`group relative flex h-12 items-center rounded-lg text-[16px] transition ${full ? "gap-4 px-4" : "justify-center px-2"} ${active ? "bg-[#213965] text-white" : "text-[#d8e3f4] hover:bg-white/8 hover:text-white"}`}>
                 {active ? <span className="absolute left-0 top-0 h-full w-1 rounded-r bg-[#2a95ff]" /> : null}
-                <Icon className={`h-[21px] w-[21px] ${active ? "text-[#58a8ff]" : "text-[#d5e2f8]"}`} />
-                <span>{item.label}</span>
+                <Icon className={`h-[21px] w-[21px] shrink-0 ${active ? "text-[#58a8ff]" : "text-[#d5e2f8]"}`} />
+                {full ? <span className="truncate">{item.label}</span> : null}
               </Link>
             );
           })}
         </nav>
 
-        <div className="mt-auto px-[17px] pb-[30px]">
-          <div className="mb-[54px] overflow-hidden rounded-lg bg-[url('/assets/sidebar-promo.png')] bg-cover bg-center p-4 shadow-lg">
-            <div className="pt-[72px] text-[15px] font-semibold leading-5">Simplify Travel.<br />Automate Communication.</div>
-            <div className="my-5 h-[2px] w-9 bg-white" />
-            <div className="text-[13px] leading-5 text-white/90">Save time.<br />Deliver better experiences.</div>
-          </div>
-<div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-full bg-[#d8c8ff] text-[15px] font-bold text-[#171236]">{initials}</div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[14px] font-semibold">{user.name}</div>
-              <div className="capitalize text-[12px] text-white/65">{user.role?.toLowerCase()}</div>
+        <div className={`mt-auto ${full ? "px-[17px]" : "px-2"} pb-[30px]`}>
+          {full ? (
+            <div className="mb-[54px] overflow-hidden rounded-lg bg-[url('/assets/sidebar-promo.png')] bg-cover bg-center p-4 shadow-lg">
+              <div className="pt-[72px] text-[15px] font-semibold leading-5">Simplify Travel.<br />Automate Communication.</div>
+              <div className="my-5 h-[2px] w-9 bg-white" />
+              <div className="text-[13px] leading-5 text-white/90">Save time.<br />Deliver better experiences.</div>
             </div>
-            <button aria-label="Log out" onClick={onLogout} type="button"><LogOut className="h-5 w-5 text-white/80" /></button>
+          ) : null}
+          <div className={`flex items-center ${full ? "gap-3" : "justify-center"}`}>
+            <div className="grid h-10 w-10 place-items-center rounded-full bg-[#d8c8ff] text-[15px] font-bold text-[#171236]">{initials}</div>
+            {full ? (
+              <>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[14px] font-semibold">{user.name}</div>
+                  <div className="capitalize text-[12px] text-white/65">{user.role?.toLowerCase()}</div>
+                </div>
+                <button aria-label="Log out" onClick={onLogout} type="button"><LogOut className="h-5 w-5 text-white/80" /></button>
+              </>
+            ) : null}
           </div>
         </div>
       </aside>

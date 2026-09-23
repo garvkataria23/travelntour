@@ -4,8 +4,9 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { BookingFilters, BookingToolbar, BookingsTable, Pagination, StatCard, initialsOf, type ApiBookingRow } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatDate } from "@/lib/api";
-import { Plane, CalendarCheck, Users, Hourglass, AlertTriangle, PlaneTakeoff, PlaneLanding, X } from "lucide-react";
+import { Plane, CalendarCheck, Users, Hourglass, AlertTriangle, PlaneTakeoff, PlaneLanding, Printer, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
 interface BookingStats {
@@ -36,6 +37,7 @@ interface BookingDetail {
   status: string;
   amount: number | null;
   currency: string | null;
+  invoiceNumber: string | null;
   source: string | null;
   createdAt: string;
   updatedAt: string;
@@ -229,7 +231,11 @@ function BookingDetailModal({ id, data, loading, onClose }: { id: string; data: 
       <div className="max-h-[85vh] w-full max-w-[560px] overflow-y-auto rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="sticky top-0 flex items-center justify-between border-b border-[#e5edf6] bg-white px-5 py-4">
           <div><h3 className="text-lg font-extrabold">Booking Details</h3><p className="text-sm text-[#596782]">PNR {booking?.pnr ?? id}</p></div>
-          <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef]" aria-label="Close"><X className="h-4 w-4" /></button>
+          <div className="flex items-center gap-2">
+            {booking?.invoiceNumber ? <span className="rounded-md bg-[#eef6ff] px-3 py-1.5 text-xs font-bold text-[#087df0]">{booking.invoiceNumber}</span> : null}
+            <Link href={`/bookings/${id}/invoice`} className="flex h-9 items-center gap-2 rounded-lg bg-[#1688f9] px-4 text-sm font-bold text-white"><Printer className="h-4 w-4" />Invoice</Link>
+            <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef]" aria-label="Close"><X className="h-4 w-4" /></button>
+          </div>
         </div>
         {loading ? <div className="px-5 py-10 text-center text-sm text-[#596782]">Loading booking…</div> : !booking ? <div className="px-5 py-10 text-center text-sm text-[#596782]">Booking not found.</div> : (
           <div className="space-y-5 px-5 py-5">

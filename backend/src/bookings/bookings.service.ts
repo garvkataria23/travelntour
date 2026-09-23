@@ -187,6 +187,13 @@ export class BookingsService {
         source: booking.source,
         amount: booking.amount,
         currency: booking.currency,
+        baseFare: booking.baseFare,
+        cost: booking.cost,
+        discount: booking.discount,
+        taxRate: booking.taxRate,
+        taxAmount: booking.taxAmount,
+        invoiceNumber: booking.invoiceNumber,
+        invoiceIssuedAt: booking.invoiceIssuedAt,
         createdAt: booking.createdAt,
         updatedAt: booking.updatedAt,
         latestMessage: booking.scheduledMessages[0] ?? null,
@@ -285,8 +292,30 @@ export class BookingsService {
       to: parseAirportInput(dto.to ?? dto.toAirport ?? ''),
     };
 
+    // Accounting: resolve GST rate, compute tax and optional invoice number.
+    const setting = await this.prisma.businessSetting.findUnique({ where: { businessId: user.businessId } });
+    const resolvedTaxRate = dto.taxRate ?? (setting?.gstEnabled ? setting?.gstRate ?? 0 : 0);
+    const baseFare = dto.baseFare ?? dto.amount ?? 0;
+    const discount = dto.discount ?? 0;
+    const taxable = Math.max(0, baseFare - discount);
+    const taxAmount =
+      dto.taxAmount ?? (resolvedTaxRate > 0 ? Math.round(taxable * (resolvedTaxRate / 100) * 100) / 100 : 0);
+
     // Create booking + scheduled messages atomically.
     const created = await this.prisma.$transaction(async (tx) => {
+      let invoiceNumber: string | null = null;
+      let invoiceIssuedAt: Date | null = null;
+      if (dto.generateInvoice) {
+        const bs = await tx.businessSetting.findUnique({ where: { businessId: user.businessId } });
+        const nextNo = bs?.nextInvoiceNo ?? 1;
+        invoiceNumber = `${bs?.invoicePrefix || 'INV'}-${String(nextNo).padStart(5, '0')}`;
+        await tx.businessSetting.upsert({
+          where: { businessId: user.businessId },
+          create: { businessId: user.businessId, nextInvoiceNo: nextNo + 1 },
+          update: { nextInvoiceNo: { increment: 1 } },
+        });
+        invoiceIssuedAt = new Date();
+      }
       const booking = await tx.booking.create({
         data: {
           businessId: user.businessId,
@@ -306,6 +335,13 @@ export class BookingsService {
           source: dto.source,
           amount: dto.amount,
           currency: dto.currency,
+          baseFare: dto.baseFare,
+          cost: dto.cost,
+          discount: dto.discount,
+          taxRate: dto.taxRate !== undefined ? dto.taxRate : resolvedTaxRate,
+          taxAmount,
+          invoiceNumber,
+          invoiceIssuedAt,
           createdBy: user.id,
         },
       });

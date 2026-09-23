@@ -5,7 +5,6 @@ import {
   IsEnum,
   IsISO8601,
   IsNumber,
-  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -36,8 +35,6 @@ export class CreateBookingDto {
 
   @IsOptional()
   @ValidateNested()
-  @Type(() => CustomerInputDto)
-  @IsObject()
   customer?: CustomerInputDto;
 
   @IsString()
@@ -93,13 +90,35 @@ export class CreateBookingDto {
   @IsString()
   currency?: string;
 
+  // --- Accounting ----------------------------------------------------
   @IsOptional()
-  @IsEnum(BookingStatus)
-  status?: BookingStatus;
+  @Type(() => Number)
+  @IsNumber()
+  baseFare?: number; // gross fare (taxable value) before discount
 
   @IsOptional()
-  @IsEnum(BookingSource)
-  source?: BookingSource;
+  @Type(() => Number)
+  @IsNumber()
+  cost?: number; // direct cost of the ticket (COGS)
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  discount?: number; // ₹ discount applied to baseFare
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  taxRate?: number; // GST % for this booking (defaults to business setting)
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  taxAmount?: number; // GST amount (let backend compute if omitted)
+
+  @IsOptional()
+  @IsBoolean()
+  generateInvoice?: boolean; // issue a printable invoice immediately
 
   @IsOptional()
   @IsBoolean()
@@ -108,4 +127,12 @@ export class CreateBookingDto {
   @IsOptional()
   @IsBoolean()
   skipAutomation?: boolean;
+
+  @IsOptional()
+  @IsEnum(BookingStatus)
+  status?: BookingStatus;
+
+  @IsOptional()
+  @IsEnum(BookingSource)
+  source?: BookingSource;
 }

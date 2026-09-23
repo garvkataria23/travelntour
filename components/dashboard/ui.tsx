@@ -4,7 +4,6 @@ import { useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { AlertCircle, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Download, Eye, Hourglass, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { bookings } from "@/lib/mock-data";
 
 const toneClasses: Record<string, string> = {
   blue: "border-blue-100 bg-gradient-to-br from-white to-blue-50 text-[#2088f1]",
@@ -100,9 +99,9 @@ export function initialsOf(name: string): string {
     .toUpperCase();
 }
 
-export function BookingsTable({ compact = false, rows: apiRows, onView, onCancel }: { compact?: boolean; rows?: ApiBookingRow[]; onView?: (id: string) => void; onCancel?: (id: string) => void }) {
+export function BookingsTable({ compact = false, rows: apiRows, onView, onCancel }: { compact?: boolean; rows: ApiBookingRow[]; onView?: (id: string) => void; onCancel?: (id: string) => void }) {
   const [menuRow, setMenuRow] = useState<string | null>(null);
-  const rows = apiRows ? apiRows.map((row) => {
+  const rows = apiRows.map((row) => {
     const initial = initialsOf(row.customerName);
     const flight = row.flightNumber || "—";
     const route = `${row.fromAirport || row.fromCity || "—"} → ${row.toAirport || row.toCity || "—"}`;
@@ -111,8 +110,8 @@ export function BookingsTable({ compact = false, rows: apiRows, onView, onCancel
     const date = new Date(row.departureDate);
     const dateLabel = `${String(date.getDate()).padStart(2, "0")} ${date.toLocaleString("en", { month: "short" })} ${date.getFullYear()}`;
     const messageStatus = row.latestMessage?.status;
-    return { key: row.id || row.pnr, customer: row.customerName, phone: row.customerPhone, initials: initial, pnr: row.pnr, flight, airline: row.airline || "—", route, routeLabel, departure, date: dateLabel, status: row.status, whatsapp: messageStatus || "SCHEDULED" };
-  }) : bookings.map((row) => ({ ...row, key: row.pnr }));
+    return { key: row.id || row.pnr, id: row.id, customer: row.customerName, phone: row.customerPhone, initials: initial, pnr: row.pnr, flight, airline: row.airline || "—", route, routeLabel, departure, date: dateLabel, status: row.status, whatsapp: messageStatus || "SCHEDULED" };
+  });
   return (
     <>
       {menuRow ? <div className="fixed inset-0 z-10" onClick={() => setMenuRow(null)} /> : null}
@@ -153,6 +152,7 @@ export function BookingsTable({ compact = false, rows: apiRows, onView, onCancel
                     <button onClick={() => setMenuRow(menuRow === row.key ? null : row.key)} className="grid h-10 w-10 place-items-center rounded-lg border border-[#d4dfed]" aria-label="More actions"><MoreHorizontal className="h-4 w-4" /></button>
                     {menuRow === row.key ? <div className="absolute right-0 top-11 z-20 w-44 overflow-hidden rounded-lg border border-[#dce7f4] bg-white shadow-xl">
                       <Link href={`/bookings?search=${encodeURIComponent(row.pnr)}`} onClick={() => setMenuRow(null)} className="block px-4 py-2.5 text-sm font-medium hover:bg-slate-50">Open booking</Link>
+                      {row.id ? <Link href={`/bookings/${row.id}/invoice`} onClick={() => setMenuRow(null)} className="block px-4 py-2.5 text-sm font-medium hover:bg-slate-50">Print invoice</Link> : null}
                       <button onClick={() => { setMenuRow(null); onCancel?.(row.key); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-rose-600 hover:bg-rose-50"><Trash2 className="h-4 w-4" />Cancel booking</button>
                     </div> : null}
                   </div>}

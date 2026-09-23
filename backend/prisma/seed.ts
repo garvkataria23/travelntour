@@ -52,7 +52,7 @@ const MESSAGE_NAMES: Record<string, string> = {
 
 const prisma = new PrismaClient();
 const TZ = 'Asia/Kolkata';
-const BUSINESS_NAME = 'Aurashine Travels';
+const BUSINESS_NAME = 'Blue Aura Tourism';
 
 const TEMPLATES: Array<{
   key: string;
@@ -334,6 +334,42 @@ async function main() {
       });
     }
   }
+
+  // Sample expenses (accounting).
+  await prisma.expense.createMany({
+    data: [
+      {
+        businessId: business.id,
+        category: 'DIRECT',
+        title: 'Airline ticket settlement',
+        description: 'Sample direct cost for ticketed inventory',
+        amount: 284000,
+        payableTo: 'VFS Airline Solutions Pvt Ltd',
+        incurredOn: now.minus({ days: 2 }).toUTC().toJSDate(),
+        createdBy: admin.id,
+      },
+      {
+        businessId: business.id,
+        category: 'OPERATING',
+        title: 'Office rent',
+        description: 'Monthly office space rent',
+        amount: 45000,
+        payableTo: 'Skyline Realty',
+        incurredOn: now.minus({ days: 5 }).toUTC().toJSDate(),
+        createdBy: admin.id,
+      },
+      {
+        businessId: business.id,
+        category: 'OPERATING',
+        title: 'Salaries',
+        description: 'Staff payroll for the month',
+        amount: 180000,
+        payableTo: 'Staff Payroll',
+        incurredOn: now.minus({ days: 2 }).toUTC().toJSDate(),
+        createdBy: admin.id,
+      },
+    ],
+  });
 
   console.log('Seed completed:');
   console.log(`  - Business: ${BUSINESS_NAME}`);

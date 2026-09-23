@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { AppShell } from "@/components/dashboard/app-shell";
-import { ArrowRight, Barcode, Building2, CalendarDays, Clock3, Flag, Lightbulb, Mail, MapPin, Plane, User, Users, MessageCircle, BarChart3, CalendarCheck, Zap } from "lucide-react";
+import { ArrowRight, Barcode, Building2, CalendarDays, Clock3, Flag, Lightbulb, Mail, MapPin, Plane, User, Users, MessageCircle, BarChart3, CalendarCheck, Zap, ReceiptText } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
@@ -13,6 +13,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export default function AddBookingPage() {
   const router = useRouter();
   const [skipAutomation, setSkipAutomation] = useState(false);
+  const [generateInvoice, setGenerateInvoice] = useState(false);
+  const [invoiceLink, setInvoiceLink] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({
     name: "",
     phone: "",
@@ -26,6 +28,10 @@ export default function AddBookingPage() {
     departureTime: "",
     terminal: "",
     amount: "",
+    baseFare: "",
+    cost: "",
+    discount: "",
+    taxRate: "",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
@@ -55,6 +61,10 @@ export default function AddBookingPage() {
     }
     if (!values.departureTime.trim()) errs.departureTime = "Departure time is required.";
     if (values.amount && Number(values.amount) <= 0) errs.amount = "Amount must be greater than 0.";
+    if (values.baseFare && Number(values.baseFare) < 0) errs.baseFare = "Base fare cannot be negative.";
+    if (values.cost && Number(values.cost) < 0) errs.cost = "Direct cost cannot be negative.";
+    if (values.discount && Number(values.discount) < 0) errs.discount = "Discount cannot be negative.";
+    if (values.taxRate && (Number(values.taxRate) < 0 || Number(values.taxRate) > 100)) errs.taxRate = "Tax rate must be between 0 and 100.";
     return errs;
   }
 
@@ -67,7 +77,7 @@ export default function AddBookingPage() {
     if (Object.keys(nextErrors).length > 0) return;
     setSubmitting(true);
     try {
-      await api("/bookings", {
+      const result = await api<{ id: string; invoiceNumber?: string | null }>("/bookings", {
         method: "POST",
         body: {
           customer: { name: values.name, phone: values.phone, email: values.email || undefined },
@@ -80,14 +90,25 @@ export default function AddBookingPage() {
           departureTime: values.departureTime || undefined,
           terminal: values.terminal || undefined,
           amount: values.amount ? Number(values.amount) : undefined,
+          baseFare: values.baseFare ? Number(values.baseFare) : undefined,
+          cost: values.cost ? Number(values.cost) : undefined,
+          discount: values.discount ? Number(values.discount) : undefined,
+          taxRate: values.taxRate ? Number(values.taxRate) : undefined,
+          generateInvoice,
           source: "MANUAL",
           status: "CONFIRMED",
           skipAutomation,
         },
       });
       setCreated(true);
-      setNotice("Booking created successfully. Redirecting to bookings…");
-      window.setTimeout(() => router.push("/bookings"), 1600);
+      if (result.invoiceNumber) {
+        setInvoiceLink(`/bookings/${result.id}/invoice`);
+        setNotice(`Booking created with invoice ${result.invoiceNumber}. Opening print view…`);
+        window.setTimeout(() => router.push(`/bookings/${result.id}/invoice`), 1200);
+      } else {
+        setNotice("Booking created successfully. Redirecting to bookings…");
+        window.setTimeout(() => router.push("/bookings"), 1600);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to create booking");
     } finally {
@@ -143,6 +164,21 @@ export default function AddBookingPage() {
               </div>
             </FormCard>
 
+            <FormCard icon={ReceiptText} title="Accounting & Invoicing" subtitle="Optional fare breakdown for profit tracking and GST invoicing.">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Input label="Base Fare" hint="(Gross, before discount)" icon={BarChart3} placeholder="e.g. 12000" type="number" value={values.baseFare} onChange={set("baseFare")} error={errors.baseFare} />
+                <Input label="Direct Cost" hint="(Your ticket cost)" icon={BarChart3} placeholder="e.g. 10500" type="number" value={values.cost} onChange={set("cost")} error={errors.cost} />
+              </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Input label="Discount" hint="(₹ off base fare)" icon={BarChart3} placeholder="e.g. 500" type="number" value={values.discount} onChange={set("discount")} error={errors.discount} />
+                <Input label="GST Rate" hint="(% default from settings)" icon={BarChart3} placeholder="e.g. 5" type="number" value={values.taxRate} onChange={set("taxRate")} error={errors.taxRate} />
+              </div>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-lg bg-[#f1f7ff] p-4">
+                <div><div className="font-bold">Generate invoice</div><div className="text-sm text-[#596782]">Issue this booking with a printable invoice number.</div></div>
+                <button type="button" role="switch" aria-checked={generateInvoice} onClick={() => setGenerateInvoice((value) => !value)} className={`relative h-7 w-12 shrink-0 rounded-full transition ${generateInvoice ? "bg-[#1688f9]" : "bg-[#b8c4d8]"}`}><span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${generateInvoice ? "left-6" : "left-1"}`} /></button>
+              </div>
+            </FormCard>
+
             <FormCard icon={Zap} title="Automation Settings" subtitle="Control automatic WhatsApp messages for this booking.">
               <div className="flex items-center justify-between gap-4 rounded-lg bg-[#f1f7ff] p-4">
                 <div><div className="font-bold">Skip automation for this booking</div><div className="text-sm text-[#596782]">When on, no confirmation or reminder messages will be sent for this booking.</div></div>
@@ -172,6 +208,7 @@ export default function AddBookingPage() {
 
         {error ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</p> : null}
         {notice ? <p className="rounded-lg bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">{notice}</p> : null}
+        {invoiceLink ? <p className="flex flex-wrap items-center gap-3 rounded-lg bg-[#eef6ff] px-4 py-3 text-sm font-medium text-[#087df0]">Invoice generated.<Link href={invoiceLink} className="rounded-lg bg-[#1688f9] px-4 py-2 font-bold text-white">Open Invoice</Link></p> : null}
 
         <div className="flex items-center justify-between border-t border-[#dce7f4] bg-white/70 py-3">
           <Link href="/bookings" className="rounded-lg border border-[#d6e1ef] bg-white px-9 py-3 font-semibold shadow-sm">Cancel</Link>

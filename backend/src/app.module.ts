@@ -8,6 +8,7 @@ import { AutomationModule } from './automation/automation.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { BusinessesModule } from './businesses/businesses.module';
 import { CustomersModule } from './customers/customers.module';
+import { ExpensesModule } from './expenses/expenses.module';
 import { HealthModule } from './health/health.module';
 import { MessagesModule } from './messages/messages.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -45,6 +46,7 @@ import { JwtAuthGuard } from './common/jwt-auth.guard';
     ReportsModule,
     SettingsModule,
     SearchModule,
+    ExpensesModule,
     HealthModule,
   ],
   providers: [

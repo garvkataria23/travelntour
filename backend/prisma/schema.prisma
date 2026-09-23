@@ -35,6 +35,11 @@ enum BookingStatus {
   CANCELLED
 }
 
+enum ExpenseCategory {
+  DIRECT
+  OPERATING
+}
+
 enum BookingSource {
   DIRECT
   WEBSITE
@@ -104,6 +109,7 @@ model Business {
   users           User[]
   customers       Customer[]
   bookings        Booking[]
+  expenses        Expense[]
   automationRules AutomationRule[]
   templates       MessageTemplate[]
   scheduledMessages ScheduledMessage[]
@@ -131,6 +137,7 @@ model User {
 
   business       Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
   bookings       Booking[]
+  expenses       Expense[]
   refreshTokens  RefreshToken[]
   auditLogs      AuditLog[]
 
@@ -171,6 +178,12 @@ model BusinessSetting {
   notify24h          Boolean  @default(true)
   notifyJourneyDay   Boolean  @default(true)
   notifyCancellation Boolean  @default(true)
+
+  gstEnabled    Boolean @default(false)
+  gstRate       Float   @default(0)
+  gstin         String?
+  invoicePrefix String  @default("INV")
+  nextInvoiceNo Int     @default(1)
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -225,6 +238,15 @@ model Booking {
   amount   Float?
   currency String?
 
+  baseFare  Float?  // gross fare before discount (taxable value)
+  cost      Float?  // direct cost of the ticket (COGS)
+  discount  Float?  // discount in ₹ applied to baseFare
+  taxRate   Float?  // GST % applied to this booking
+  taxAmount Float?  // GST amount = (baseFare - discount) * taxRate/100
+
+  invoiceNumber   String?
+  invoiceIssuedAt DateTime?
+
   createdBy String
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -241,8 +263,30 @@ model Booking {
   @@index([businessId])
   @@index([businessId, departureDate])
   @@index([businessId, status])
-  @@index([businessId, customerId])
   @@index([departureDate])
+}
+
+model Expense {
+  id         String @id @default(uuid())
+  businessId String
+  category   ExpenseCategory @default(OPERATING)
+  title       String
+  description String?
+  amount     Float
+  currency   String @default("INR")
+  payableTo  String?
+  incurredOn DateTime @default(now())
+  createdBy  String
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  creator  User    @relation(fields: [createdBy], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([businessId, incurredOn])
+  @@index([businessId, category])
 }
 
 model AutomationRule {

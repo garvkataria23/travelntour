@@ -4,7 +4,7 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { StatCard } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatCurrency, formatDate } from "@/lib/api";
-import { CalendarDays, Download, MessageCircle, Plane, Users, X } from "lucide-react";
+import { CalendarDays, Download, MessageCircle, Plane, TrendingDown, TrendingUp, Users, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 interface TrendPoint { date: string; count: number }
@@ -12,6 +12,15 @@ interface RecentBooking { id: string; createdAt: string; pnr: string; customerNa
 interface BookingsReport { total: number; revenue: number; byStatus: { status: string; count: number }[]; bySource: { source: string; count: number }[]; trend: TrendPoint[]; recent: RecentBooking[] }
 interface MonthBucket { month: string; revenue: number; count: number }
 interface RevenueReport { totalRevenue: number; currency: string; byMonth: MonthBucket[] }
+interface OverviewStats {
+  stats: {
+    revenue: number;
+    directCost: number;
+    operatingCost: number;
+    grossProfit: number;
+    netProfit: number;
+  };
+}
 interface MessagesReport { total: number; delivered: number; read: number; sent: number; pending: number; failed: number; cancelled: number; deliveryRate: number; readRate: number; failedRate: number }
 interface CustomersReport { total: number; growth: { month: string; count: number }[]; top: { id: string; name: string; phone: string; bookings: number }[] }
 interface RouteRow { route: string; count: number }
@@ -79,6 +88,7 @@ export default function ReportsPage() {
 
   const bookingsRep = useApi<BookingsReport>(`/reports/bookings${rangeQs}`);
   const revenueRep = useApi<RevenueReport>(`/reports/revenue${rangeQs}`);
+  const overviewRep = useApi<OverviewStats>("/reports/overview");
   const messagesRep = useApi<MessagesReport>(`/reports/messages${rangeQs}`);
   const customersRep = useApi<CustomersReport>("/reports/customers");
   const routesRep = useApi<RouteRow[]>("/reports/routes");
@@ -130,6 +140,8 @@ export default function ReportsPage() {
   const statCards = [
     { title: "Total Bookings", value: bookingsRep.data ? String(bookingsRep.data.total) : "—", icon: Plane, tone: "blue", delta: "", sub: from || to ? "in selected range" : "all time" },
     { title: "Total Revenue", value: revenueRep.data ? formatCurrency(revenueRep.data.totalRevenue, revenueRep.data.currency) : "—", icon: Users, tone: "green", delta: "", sub: "non-cancelled" },
+    { title: "Gross Profit", value: overviewRep.data ? formatCurrency(overviewRep.data.stats.grossProfit, revenueRep.data?.currency) : "—", icon: TrendingUp, tone: "emerald", delta: "", sub: "revenue minus direct cost" },
+    { title: "Net Profit", value: overviewRep.data ? formatCurrency(overviewRep.data.stats.netProfit, revenueRep.data?.currency) : "—", icon: TrendingDown, tone: overviewRep.data && overviewRep.data.stats.netProfit < 0 ? "rose" : "purple", delta: "", sub: "gross minus operating cost" },
     { title: "Total Customers", value: customersRep.data ? String(customersRep.data.total) : "—", icon: Users, tone: "purple", delta: "", sub: "all time" },
     { title: "Messages Sent", value: messagesRep.data ? String(messagesRep.data.total) : "—", icon: MessageCircle, tone: "orange", delta: "", sub: from || to ? "in selected range" : "all time" },
   ];
@@ -165,7 +177,7 @@ export default function ReportsPage() {
 
         <div className="grid gap-3 xl:grid-cols-[1fr_205px]">
           <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{statCards.map((s) => <StatCard key={s.title} {...s} />)}</div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{statCards.map((s) => <StatCard key={s.title} {...s} />)}</div>
 
             <div className="flex flex-wrap gap-2 border-b border-[#dce7f4]">
               {TABS.map((t) => (
@@ -184,6 +196,9 @@ export default function ReportsPage() {
                 </Card>
                 <Card title="Revenue Trend">
                   <RevenueChart byMonth={byMonth} max={maxRevenue} currency={revenueRep.data?.currency} />
+                </Card>
+                <Card title="Expense Breakdown">
+                  <ExpenseBreakdown stats={overviewRep.data?.stats} currency={revenueRep.data?.currency ?? undefined} />
                 </Card>
                 <Card title="Top Routes" action={<button onClick={() => setRoutesOpen(true)} className="rounded-lg border border-[#d6e1ef] px-4 py-2 text-sm font-normal text-[#405174]">View All</button>}>
                   <div className="space-y-4">
@@ -413,6 +428,33 @@ function StatusBar({ label, count, total, color }: { label: string; count: numbe
 
 function MiniStat({ label, value, color }: { label: string; value: string; color: string }) {
   return <div className="rounded-xl border border-[#dce7f4] bg-white p-4"><p className="text-sm font-semibold text-[#596782]">{label}</p><p className={`mt-1 text-2xl font-extrabold ${color}`}>{value}</p></div>;
+}
+
+function ExpenseBreakdown({ stats, currency }: { stats?: OverviewStats["stats"]; currency?: string }) {
+  if (!stats) return <p className="py-6 text-center text-sm text-[#596782]">Loading accounting data...</p>;
+  const rows = [
+    { label: "Revenue", value: stats.revenue, color: "#1688f9" },
+    { label: "Direct Cost", value: stats.directCost, color: "#fb8500" },
+    { label: "Operating Cost", value: stats.operatingCost, color: "#8a97ad" },
+    { label: "Gross Profit", value: stats.grossProfit, color: "#19b96b" },
+    { label: "Net Profit", value: stats.netProfit, color: stats.netProfit < 0 ? "#ef2b59" : "#7f2cff" },
+  ];
+  const max = Math.max(1, ...rows.map((r) => Math.abs(r.value)));
+  const margin = stats.revenue > 0 ? Math.round((stats.netProfit / stats.revenue) * 100) : 0;
+  return (
+    <div>
+      <div className="space-y-4">
+        {rows.map((row) => (
+          <div key={row.label} className="grid grid-cols-[92px_1fr_auto] items-center gap-3 text-sm">
+            <span className="truncate text-[#405174]">{row.label}</span>
+            <span className="h-2.5 rounded bg-[#e5edf6]"><span className="block h-2.5 rounded" style={{ width: `${Math.max(2, Math.round((Math.abs(row.value) / max) * 100))}%`, background: row.color }} /></span>
+            <b className="w-full text-right">{formatCurrency(row.value, currency ?? undefined)}</b>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 border-t border-[#e5edf6] pt-3 text-sm text-[#596782]">Net margin <b className={stats.netProfit < 0 ? "text-rose-600" : "text-green-600"}>{margin}%</b> on all-time revenue</p>
+    </div>
+  );
 }
 
 function Bar({ segment, pct }: { segment: string; pct: number }) {

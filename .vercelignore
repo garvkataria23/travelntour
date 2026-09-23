@@ -1,0 +1,8 @@
+backend
+META-WHATSAPP-API-KIT
+.next-stale
+static-serve.mjs
+*.log
+.env
+.env.local
+.env.production

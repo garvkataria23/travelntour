@@ -1,0 +1,199 @@
+"use client";
+
+import { AppShell } from "@/components/dashboard/app-shell";
+import { StatCard } from "@/components/dashboard/ui";
+import { useApi } from "@/lib/hooks";
+import { api, formatCurrency } from "@/lib/api";
+import { FormEvent, useState } from "react";
+import { CalendarDays, Plus, Receipt, Search, Trash2, TrendingDown, TrendingUp, Wallet, X } from "lucide-react";
+
+interface ExpenseRow {
+  id: string;
+  category: "DIRECT" | "OPERATING";
+  title: string;
+  description?: string | null;
+  amount: number;
+  currency: string;
+  payableTo?: string | null;
+  incurredOn: string;
+  createdAt: string;
+}
+
+interface ExpenseList {
+  items: ExpenseRow[];
+  meta: { page: number; limit: number; total: number; pages: number };
+  summary: { total: number; count: number };
+}
+
+interface ExpenseStats {
+  month: string;
+  direct: number;
+  operating: number;
+  total: number;
+  count: number;
+  byCategory: Array<{ category: string; total: number; count: number }>;
+}
+
+export default function ExpensesPage() {
+  const [addOpen, setAddOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const list = useApi<ExpenseList>(`/expenses?${search ? `search=${encodeURIComponent(search)}` : ""}`);
+  const stats = useApi<ExpenseStats>("/expenses/stats");
+  const [actionError, setActionError] = useState("");
+  const [toast, setToast] = useState("");
+
+  async function handleDelete(id: string) {
+    setActionError("");
+    try {
+      await api(`/expenses/${id}`, { method: "DELETE" });
+      list.refetch();
+      stats.refetch();
+      setToast("Expense removed.");
+      window.setTimeout(() => setToast(""), 3000);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to delete expense");
+    }
+  }
+
+  const statCards = [
+    { title: "Total Expenses", value: list.data ? formatCurrency(list.data.summary.total) : "—", icon: Wallet, tone: "blue", sub: `${list.data?.summary.count ?? 0} entries` },
+    { title: "This Month", value: stats.data ? formatCurrency(stats.data.total) : "—", icon: Receipt, tone: "purple", sub: "current month" },
+    { title: "Direct Cost", value: stats.data ? formatCurrency(stats.data.direct) : "—", icon: TrendingDown, tone: "orange", sub: "COGS this month" },
+    { title: "Operating Cost", value: stats.data ? formatCurrency(stats.data.operating) : "—", icon: TrendingUp, tone: "rose", sub: "overheads this month" },
+  ];
+
+  return (
+    <AppShell>
+      <div className="space-y-4 pt-2">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+          <div>
+            <h1 className="text-[34px] font-extrabold tracking-[-0.04em]">Expenses</h1>
+            <p className="text-base text-[#596782]">Track direct costs and operating overheads to compute your real profits.</p>
+          </div>
+          <button onClick={() => setAddOpen(true)} className="flex h-11 items-center gap-2 rounded-lg bg-[#1688f9] px-6 font-bold text-white"><Plus className="h-4 w-4" />Add Expense</button>
+        </div>
+
+        {actionError ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{actionError}</p> : null}
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{statCards.map((s) => <StatCard key={s.title} {...s} />)}</div>
+
+        <section className="overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-[0_10px_24px_rgba(31,61,105,0.04)]">
+          <div className="flex items-center gap-3 border-b border-[#e5edf6] p-4">
+            <div className="flex h-11 flex-1 items-center gap-3 rounded-lg border border-[#d6e1ef] px-3"><Search className="h-4 w-4 text-[#65728a]" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by title, payable to or note..." className="min-w-0 flex-1 bg-transparent text-sm outline-none" /></div>
+          </div>
+          {list.error ? <p className="px-5 py-6 text-center text-sm text-rose-600">{list.error}</p> : null}
+          {!list.loading && list.data && list.data.items.length === 0 ? <p className="px-5 py-12 text-center text-sm text-[#596782]">No expenses recorded yet. Add your first expense to start tracking profit.</p> : null}
+          {list.loading ? <p className="px-5 py-12 text-center text-sm text-[#596782]">Loading expenses…</p> : null}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-left text-sm">
+              <thead className="bg-[#f4f7fb] text-[#071333]">
+                <tr>
+                  <th className="px-4 py-4 font-semibold">Expense</th>
+                  <th className="px-4 py-4 font-semibold">Category</th>
+                  <th className="px-4 py-4 font-semibold">Payable To</th>
+                  <th className="px-4 py-4 font-semibold">Date</th>
+                  <th className="px-4 py-4 text-right font-semibold">Amount</th>
+                  <th className="px-4 py-4" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#e5edf6]">
+                {(list.data?.items ?? []).map((row) => {
+                  const direct = row.category === "DIRECT";
+                  return (
+                    <tr key={row.id} className="bg-white hover:bg-blue-50/30">
+                      <td className="px-4 py-3"><div className="font-semibold text-[#071333]">{row.title}</div>{row.description ? <div className="text-[#65728a]">{row.description}</div> : null}</td>
+                      <td className="px-4 py-3"><span className={`inline-flex rounded-md px-2.5 py-1 text-xs font-bold ${direct ? "bg-[#fff0dc] text-[#fb8500]" : "bg-[#e8edf5] text-[#5a6577]"}`}>{direct ? "DIRECT" : "OPERATING"}</span></td>
+                      <td className="px-4 py-3 text-[#405174]">{row.payableTo ?? "—"}</td>
+                      <td className="px-4 py-3 text-[#405174]">{formatDateInput(row.incurredOn)}</td>
+                      <td className="px-4 py-3 text-right font-bold text-[#071333]">{formatCurrency(row.amount, row.currency)}</td>
+                      <td className="px-4 py-3 text-right"><button onClick={() => handleDelete(row.id)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d4dfed] text-rose-500 transition hover:bg-rose-50" aria-label="Delete expense"><Trash2 className="h-4 w-4" /></button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      {addOpen ? <AddExpenseModal onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); list.refetch(); stats.refetch(); }} /> : null}
+      {toast ? <div className="fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-lg bg-[#071832] px-5 py-3 text-sm font-semibold text-white shadow-2xl">{toast}</div> : null}
+    </AppShell>
+  );
+}
+
+function AddExpenseModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [category, setCategory] = useState<"DIRECT" | "OPERATING">("OPERATING");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [payableTo, setPayableTo] = useState("");
+  const [incurredOn, setIncurredOn] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const parsed = Number(amount);
+    if (title.trim().length < 2) { setError("Title must be at least 2 characters."); return; }
+    if (!amount || Number.isNaN(parsed) || parsed <= 0) { setError("Amount must be greater than 0."); return; }
+    setSubmitting(true);
+    try {
+      await api("/expenses", {
+        method: "POST",
+        body: {
+          category,
+          title: title.trim(),
+          description: description.trim() || undefined,
+          amount: parsed,
+          payableTo: payableTo.trim() || undefined,
+          incurredOn: incurredOn || undefined,
+        },
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to add expense");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-[520px] rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-[#e5edf6] px-5 py-4">
+          <div><h3 className="text-lg font-extrabold">Add Expense</h3><p className="text-sm text-[#596782]">Record a direct cost or operating expense.</p></div>
+          <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef]" aria-label="Close"><X className="h-4 w-4" /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4 p-5">
+          {error ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</p> : null}
+          <div>
+            <span className="mb-2 block text-sm font-semibold">Category</span>
+            <div className="grid grid-cols-2 gap-3">
+              <button type="button" onClick={() => setCategory("DIRECT")} className={`rounded-lg border px-4 py-3 text-left text-sm ${category === "DIRECT" ? "border-[#fb8500] bg-[#fff7ec] ring-2 ring-orange-100" : "border-[#d6e1ef]"}`}><b>Direct Cost</b><span className="block text-xs text-[#65728a]">COGS — tickets, GDS fees</span></button>
+              <button type="button" onClick={() => setCategory("OPERATING")} className={`rounded-lg border px-4 py-3 text-left text-sm ${category === "OPERATING" ? "border-[#1688f9] bg-[#eef6ff] ring-2 ring-blue-100" : "border-[#d6e1ef]"}`}><b>Operating</b><span className="block text-xs text-[#65728a]">Rent, salaries, marketing</span></button>
+            </div>
+          </div>
+          <label className="block"><span className="mb-2 block text-sm font-semibold">Title *</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Airline ticket settlement" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block"><span className="mb-2 block text-sm font-semibold">Amount (₹) *</span><input type="number" min="0" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="e.g. 25000" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+            <label className="block"><span className="mb-2 block text-sm font-semibold">Payable To</span><input value={payableTo} onChange={(event) => setPayableTo(event.target.value)} placeholder="e.g. Vendor name" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+          </div>
+          <label className="block"><span className="mb-2 block text-sm font-semibold">Date Incurred</span><span className="relative flex h-11 items-center gap-2 rounded-lg border border-[#d6e1ef] px-3"><CalendarDays className="h-4 w-4 text-[#65728a]" /><input type="date" value={incurredOn} onChange={(event) => setIncurredOn(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm outline-none" /><span className="text-xs text-[#65728a]">defaults to today</span></span></label>
+          <label className="block"><span className="mb-2 block text-sm font-semibold">Note</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} placeholder="Optional internal note" className="w-full rounded-lg border border-[#d6e1ef] px-3 py-2.5 text-sm outline-none focus:border-[#1688f9]" /></label>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="h-11 rounded-lg border border-[#d6e1ef] px-6 font-semibold text-[#405174]">Cancel</button>
+            <button type="submit" disabled={submitting} className="flex h-11 items-center gap-2 rounded-lg bg-[#1688f9] px-6 font-bold text-white disabled:opacity-60">{submitting ? "Saving..." : "Save Expense"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function formatDateInput(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(d);
+}

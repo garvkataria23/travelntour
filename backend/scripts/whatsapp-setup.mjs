@@ -50,7 +50,7 @@ const TRAVEL_TEMPLATES = [
     language: "en",
     category: "UTILITY",
     components: [
-      { type: "BODY", text: "Hi {{1}} 👋\n\nYour flight booking has been confirmed! ✈️\n\n🧾 PNR: {{2}}\n✈️ Flight: {{3}}\n🛫 From: {{4}}\n🛬 To: {{5}}\n🗓️ Date: {{6}}\n⏱️ Time: {{7}}\nTerminal: {{8}}\n\nWe wish you a safe and pleasant journey! 😊\nTeam Aurashine Travels" },
+      { type: "BODY", text: "Hi {{1}} 👋\n\nYour flight booking has been confirmed! ✈️\n\n🧾 PNR: {{2}}\n✈️ Flight: {{3}}\n🛫 From: {{4}}\n🛬 To: {{5}}\n🗓️ Date: {{6}}\n⏱️ Time: {{7}}\nTerminal: {{8}}\n\nWe wish you a safe and pleasant journey! 😊\nTeam Blue Aura Tourism" },
     ],
   },
   {
@@ -58,7 +58,7 @@ const TRAVEL_TEMPLATES = [
     language: "en",
     category: "UTILITY",
     components: [
-      { type: "BODY", text: "Hi {{1}},\n\nYour flight is in 48 hours! ✈️\n\n🧾 PNR: {{2}}\n✈️ Flight: {{3}}\n🛫 From: {{4}}\n🛬 To: {{5}}\n🗓️ Date: {{6}}\n⏱️ Time: {{7}}\n\nKindly complete web check-in to save time at the airport.\nTeam Aurashine Travels" },
+      { type: "BODY", text: "Hi {{1}},\n\nYour flight is in 48 hours! ✈️\n\n🧾 PNR: {{2}}\n✈️ Flight: {{3}}\n🛫 From: {{4}}\n🛬 To: {{5}}\n🗓️ Date: {{6}}\n⏱️ Time: {{7}}\n\nKindly complete web check-in to save time at the airport.\nTeam Blue Aura Tourism" },
     ],
   },
   {
@@ -66,7 +66,7 @@ const TRAVEL_TEMPLATES = [
     language: "en",
     category: "UTILITY",
     components: [
-      { type: "BODY", text: "Hi {{1}},\n\nYour flight is tomorrow! 🛫\n\n🧾 PNR: {{2}}\n✈️ Flight: {{3}}\n🛫 From: {{4}}\n🛬 To: {{5}}\n🗓️ Date: {{6}}\n⏱️ Time: {{7}}\nTerminal: {{8}}\n\nDon't forget to check-in online.\nTeam Aurashine Travels" },
+      { type: "BODY", text: "Hi {{1}},\n\nYour flight is tomorrow! 🛫\n\n🧾 PNR: {{2}}\n✈️ Flight: {{3}}\n🛫 From: {{4}}\n🛬 To: {{5}}\n🗓️ Date: {{6}}\n⏱️ Time: {{7}}\nTerminal: {{8}}\n\nDon't forget to check-in online.\nTeam Blue Aura Tourism" },
     ],
   },
   {
@@ -74,7 +74,7 @@ const TRAVEL_TEMPLATES = [
     language: "en",
     category: "UTILITY",
     components: [
-      { type: "BODY", text: "Hi {{1}},\n\nWishing you a safe journey! ✨\n\n🧾 PNR: {{2}}\n✈️ Flight: {{3}}\n🛫 From: {{4}}\n🛬 To: {{5}}\n🗓️ Date: {{6}}\n⏱️ Time: {{7}}\nTerminal: {{8}}\n\nHave a wonderful trip! 😊\nTeam Aurashine Travels" },
+      { type: "BODY", text: "Hi {{1}},\n\nWishing you a safe journey! ✨\n\n🧾 PNR: {{2}}\n✈️ Flight: {{3}}\n🛫 From: {{4}}\n🛬 To: {{5}}\n🗓️ Date: {{6}}\n⏱️ Time: {{7}}\nTerminal: {{8}}\n\nHave a wonderful trip! 😊\nTeam Blue Aura Tourism" },
     ],
   },
   {
@@ -82,7 +82,7 @@ const TRAVEL_TEMPLATES = [
     language: "en",
     category: "UTILITY",
     components: [
-      { type: "BODY", text: "Hi {{1}},\n\nYour booking (PNR: {{2}}) has been cancelled. ✈️\n\n✈️ Flight: {{3}}\n🛫 From: {{4}}\n🛬 To: {{5}}\n🗓️ Date: {{6}}\n⏱️ Time: {{7}}\nTerminal: {{8}}\n\nIf you have any questions, please reply to this message.\nTeam Aurashine Travels" },
+      { type: "BODY", text: "Hi {{1}},\n\nYour booking (PNR: {{2}}) has been cancelled. ✈️\n\n✈️ Flight: {{3}}\n🛫 From: {{4}}\n🛬 To: {{5}}\n🗓️ Date: {{6}}\n⏱️ Time: {{7}}\nTerminal: {{8}}\n\nIf you have any questions, please reply to this message.\nTeam Blue Aura Tourism" },
     ],
   },
 ];

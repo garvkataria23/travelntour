@@ -78,14 +78,24 @@ export class ReportsService {
       createdAt: a.createdAt,
     }));
 
+    const revenueTotal = (await this.prisma.booking.aggregate({
+      where: { businessId, status: { not: 'CANCELLED' }, amount: { not: null } },
+      _sum: { amount: true },
+    }))._sum.amount ?? 0;
+    const expenseAgg = await this.prisma.expense.groupBy({ by: ['category'], where: { businessId }, _sum: { amount: true } });
+    const directCost = expenseAgg.find((e) => e.category === 'DIRECT')?._sum.amount ?? 0;
+    const operatingCost = expenseAgg.find((e) => e.category === 'OPERATING')?._sum.amount ?? 0;
+
     return {
       stats: {
         totalBookings,
         todayJourneys,
         upcomingJourneys,
-        messagesSent: total,
-        pendingMessages: count('SCHEDULED') + count('PROCESSING'),
-        failedMessages: count('FAILED'),
+        revenue: revenueTotal ?? 0,
+        directCost,
+        operatingCost,
+        grossProfit: (revenueTotal ?? 0) - directCost,
+        netProfit: (revenueTotal ?? 0) - directCost - operatingCost,
       },
       messageStatus: {
         total,
