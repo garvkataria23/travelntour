@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { AlertTriangle, BarChart3, Bell, CalendarCheck, Check, ChevronDown, Clock3, Command, FileText, Home, LogOut, Menu, MessageCircle, Plane, Plus, Search, Settings, Users, Wallet, Workflow, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Banknote, BarChart3, Bell, CalendarCheck, Check, ChevronDown, Clock3, Command, FileText, Home, LogOut, Menu, MessageCircle, Plane, Plus, Receipt, Search, Settings, Users, Wallet, Workflow, X, type LucideIcon } from "lucide-react";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { api, clearSession, formatDate, getAccessToken, getStoredUser, type ApiUser } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
@@ -17,7 +17,9 @@ const NAV_ITEMS: Array<{ label: string; href: string; icon: LucideIcon }> = [
   { label: "Automation", href: "/automation", icon: Settings },
   { label: "Message Templates", href: "/message-templates", icon: FileText },
   { label: "Reports", href: "/reports", icon: BarChart3 },
+  { label: "Invoices", href: "/invoices", icon: Receipt },
   { label: "Expenses", href: "/expenses", icon: Wallet },
+  { label: "Income", href: "/income", icon: Banknote },
   { label: "Settings", href: "/settings", icon: Workflow },
 ];
 
@@ -34,7 +36,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       router.replace("/");
       return;
     }
-    setUser(getStoredUser());
+    const stored = getStoredUser();
+    if (!stored) {
+      clearSession();
+      router.replace("/");
+      return;
+    }
+    setUser(stored);
   }, [router]);
 
   if (!user) return null;
@@ -76,25 +84,25 @@ function Sidebar({ open, onClose, user, onLogout, expanded, onHoverChange }: { o
         onMouseLeave={() => onHoverChange(false)}
         className={`fixed inset-y-0 left-0 z-50 flex w-[237px] flex-col overflow-hidden bg-[#071832] text-white shadow-2xl transition-[width,transform] duration-200 lg:translate-x-0 ${expanded ? "lg:w-[237px]" : "lg:w-[76px]"} ${open ? "translate-x-0" : "-translate-x-full"}`}
       >
-        <div className={`flex h-[88px] items-start ${full ? "justify-between" : "justify-center"} px-[17px] pt-[22px]`}>
+        <div className={`flex h-[68px] items-center ${full ? "justify-between" : "justify-center"} px-[17px]`}>
           <Link href="/dashboard" className="flex items-center gap-2" onClick={onClose}>
-            <Plane className="h-12 w-12 -rotate-45 fill-[#218bf3] stroke-[#218bf3] stroke-[1.5]" />
+            <Plane className="h-10 w-10 -rotate-45 fill-[#218bf3] stroke-[#218bf3] stroke-[1.5]" />
             {full ? (
               <div>
-                <div className="text-[21px] font-extrabold leading-none tracking-[-0.04em]">Fly<span className="text-[#2494ff]">Connect</span></div>
-                <div className="mt-2 text-[8px] font-bold uppercase tracking-[0.1em] text-white/75">Travel Smarter, Together</div>
+                <div className="text-[20px] font-extrabold leading-none tracking-[-0.04em]">Fly<span className="text-[#2494ff]">Connect</span></div>
+                <div className="mt-[6px] text-[8px] font-bold uppercase tracking-[0.1em] text-white/75">Travel Smarter, Together</div>
               </div>
             ) : null}
           </Link>
           {full ? <button className="lg:hidden" onClick={onClose} type="button"><X className="h-5 w-5" /></button> : null}
         </div>
 
-        <nav className="mt-2 space-y-[7px] px-2">
+        <nav className="no-scrollbar mt-1 flex-1 space-y-[3px] overflow-y-auto px-2">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || (item.href === "/bookings" && pathname.startsWith("/bookings") && pathname !== "/bookings/add") || (item.href === "/bookings/add" && pathname === "/bookings/add");
             return (
-              <Link key={item.href} href={item.href} onClick={onClose} className={`group relative flex h-12 items-center rounded-lg text-[16px] transition ${full ? "gap-4 px-4" : "justify-center px-2"} ${active ? "bg-[#213965] text-white" : "text-[#d8e3f4] hover:bg-white/8 hover:text-white"}`}>
+              <Link key={item.href} href={item.href} onClick={onClose} className={`group relative flex h-[38px] items-center rounded-lg text-[16px] transition ${full ? "gap-4 px-4" : "justify-center px-2"} ${active ? "bg-[#213965] text-white" : "text-[#d8e3f4] hover:bg-white/8 hover:text-white"}`}>
                 {active ? <span className="absolute left-0 top-0 h-full w-1 rounded-r bg-[#2a95ff]" /> : null}
                 <Icon className={`h-[21px] w-[21px] shrink-0 ${active ? "text-[#58a8ff]" : "text-[#d5e2f8]"}`} />
                 {full ? <span className="truncate">{item.label}</span> : null}
@@ -104,13 +112,6 @@ function Sidebar({ open, onClose, user, onLogout, expanded, onHoverChange }: { o
         </nav>
 
         <div className={`mt-auto ${full ? "px-[17px]" : "px-2"} pb-[30px]`}>
-          {full ? (
-            <div className="mb-[54px] overflow-hidden rounded-lg bg-[url('/assets/sidebar-promo.png')] bg-cover bg-center p-4 shadow-lg">
-              <div className="pt-[72px] text-[15px] font-semibold leading-5">Simplify Travel.<br />Automate Communication.</div>
-              <div className="my-5 h-[2px] w-9 bg-white" />
-              <div className="text-[13px] leading-5 text-white/90">Save time.<br />Deliver better experiences.</div>
-            </div>
-          ) : null}
           <div className={`flex items-center ${full ? "gap-3" : "justify-center"}`}>
             <div className="grid h-10 w-10 place-items-center rounded-full bg-[#d8c8ff] text-[15px] font-bold text-[#171236]">{initials}</div>
             {full ? (

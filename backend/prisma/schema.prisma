@@ -46,6 +46,20 @@ enum BookingSource {
   WHATSAPP
   PHONE
   WALK_IN
+  MANUAL
+  OTHER
+}
+
+enum InvoicePaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+enum IncomeCategory {
+  TICKET_SALE
+  COMMISSION
+  REFUND
   OTHER
 }
 
@@ -110,6 +124,7 @@ model Business {
   customers       Customer[]
   bookings        Booking[]
   expenses        Expense[]
+  incomes         Income[]
   automationRules AutomationRule[]
   templates       MessageTemplate[]
   scheduledMessages ScheduledMessage[]
@@ -138,6 +153,7 @@ model User {
   business       Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
   bookings       Booking[]
   expenses       Expense[]
+  incomes        Income[]
   refreshTokens  RefreshToken[]
   auditLogs      AuditLog[]
 
@@ -247,6 +263,9 @@ model Booking {
   invoiceNumber   String?
   invoiceIssuedAt DateTime?
 
+  paymentStatus InvoicePaymentStatus @default(UNPAID)
+  paidAmount    Float?
+
   createdBy String
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -255,6 +274,7 @@ model Booking {
 
   scheduledMessages ScheduledMessage[]
   messageLogs       MessageLog[]
+  invoiceItems      InvoiceItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -263,7 +283,25 @@ model Booking {
   @@index([businessId])
   @@index([businessId, departureDate])
   @@index([businessId, status])
+  @@index([businessId, invoiceNumber])
   @@index([departureDate])
+}
+
+model InvoiceItem {
+  id          String  @id @default(uuid())
+  bookingId   String
+  description String
+  quantity    Float   @default(1)
+  unitPrice   Float   @default(0)
+  amount      Float   @default(0)
+  sortOrder   Int     @default(0)
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookingId])
 }
 
 model Expense {
@@ -286,6 +324,29 @@ model Expense {
 
   @@index([businessId])
   @@index([businessId, incurredOn])
+  @@index([businessId, category])
+}
+
+model Income {
+  id         String         @id @default(uuid())
+  businessId String
+  category   IncomeCategory @default(OTHER)
+  title      String
+  note       String?
+  amount     Float
+  currency   String         @default("INR")
+  reference  String?
+  receivedOn DateTime       @default(now())
+  createdBy  String
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  creator  User     @relation(fields: [createdBy], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([businessId, receivedOn])
   @@index([businessId, category])
 }
 

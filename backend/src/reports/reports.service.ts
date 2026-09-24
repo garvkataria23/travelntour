@@ -82,6 +82,9 @@ export class ReportsService {
       where: { businessId, status: { not: 'CANCELLED' }, amount: { not: null } },
       _sum: { amount: true },
     }))._sum.amount ?? 0;
+    const manualIncome =
+      (await this.prisma.income.aggregate({ where: { businessId }, _sum: { amount: true } }))._sum.amount ?? 0;
+    const totalIncome = (revenueTotal ?? 0) + manualIncome;
     const expenseAgg = await this.prisma.expense.groupBy({ by: ['category'], where: { businessId }, _sum: { amount: true } });
     const directCost = expenseAgg.find((e) => e.category === 'DIRECT')?._sum.amount ?? 0;
     const operatingCost = expenseAgg.find((e) => e.category === 'OPERATING')?._sum.amount ?? 0;
@@ -92,10 +95,12 @@ export class ReportsService {
         todayJourneys,
         upcomingJourneys,
         revenue: revenueTotal ?? 0,
+        manualIncome,
+        totalIncome,
         directCost,
         operatingCost,
-        grossProfit: (revenueTotal ?? 0) - directCost,
-        netProfit: (revenueTotal ?? 0) - directCost - operatingCost,
+        grossProfit: totalIncome - directCost,
+        netProfit: totalIncome - directCost - operatingCost,
       },
       messageStatus: {
         total,
@@ -231,6 +236,122 @@ export class ReportsService {
     };
   }
 
+  async expenses(user: AuthUser, opts: { from?: string; to?: string }) {
+    const timezone = await this.tz(user);
+    const range = this.dateRange(timezone, opts);
+    const where = { businessId: user.businessId, ...(range ? { incurredOn: range } : {}) };
+
+    const [byCategory, rows, agg] = await Promise.all([
+      this.prisma.expense.groupBy({ by: ['category'], where, _sum: { amount: true }, _count: true }),
+      this.prisma.expense.findMany({
+        where,
+        select: { incurredOn: true, amount: true, category: true, title: true, payableTo: true },
+      }),
+      this.prisma.expense.aggregate({ where, _sum: { amount: true }, _count: true }),
+    ]);
+
+    const byTitle = new Map<string, { total: number; count: number }>();
+    for (const row of rows) {
+      const bucket = byTitle.get(row.title) ?? { total: 0, count: 0 };
+      bucket.total += row.amount ?? 0;
+      bucket.count += 1;
+      byTitle.set(row.title, bucket);
+    }
+
+    const byMonth = new Map<string, { total: number; count: number }>();
+    for (const row of rows) {
+      const label = DateTime.fromJSDate(row.incurredOn).setZone(timezone).toFormat('MMM yyyy');
+      const bucket = byMonth.get(label) ?? { total: 0, count: 0 };
+      bucket.total += row.amount ?? 0;
+      bucket.count += 1;
+      byMonth.set(label, bucket);
+    }
+
+    const currency = (await this.prisma.business.findUnique({ where: { id: user.businessId } }))?.currency || 'INR';
+
+    return {
+      total: agg._sum.amount ?? 0,
+      count: agg._count,
+      currency,
+      byCategory: byCategory.map((c) => ({
+        category: c.category,
+        total: c._sum.amount ?? 0,
+        count: c._count,
+      })),
+      directCost: byCategory.find((c) => c.category === 'DIRECT')?._sum.amount ?? 0,
+      operatingCost: byCategory.find((c) => c.category === 'OPERATING')?._sum.amount ?? 0,
+      byTitle: [...byTitle.entries()]
+        .map(([title, value]) => ({ title, ...value }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 10),
+      byMonth: [...byMonth.entries()].map(([month, value]) => ({ month, ...value })),
+    };
+  }
+
+  async invoicesReport(user: AuthUser, opts: { from?: string; to?: string }) {
+    const timezone = await this.tz(user);
+    const range = this.dateRange(timezone, opts);
+    const where = {
+      businessId: user.businessId,
+      invoiceIssuedAt: { not: null },
+      ...(range ? { invoiceIssuedAt: range } : {}),
+    };
+
+    const [byStatus, rows] = await Promise.all([
+      this.prisma.booking.groupBy({ by: ['paymentStatus'], where, _count: { _all: true } }),
+      this.prisma.booking.findMany({
+        where,
+        select: {
+          invoiceIssuedAt: true,
+          invoiceNumber: true,
+          paymentStatus: true,
+          paidAmount: true,
+          baseFare: true,
+          amount: true,
+          discount: true,
+          taxRate: true,
+          taxAmount: true,
+          invoiceItems: { select: { amount: true } },
+        },
+      }),
+    ]);
+
+    const byMonth = new Map<string, { billed: number; collected: number; count: number }>();
+    let billed = 0;
+    let collected = 0;
+    for (const row of rows) {
+      const items = row.invoiceItems ?? [];
+      const subtotal = items.length > 0 ? items.reduce((s, i) => s + (i.amount || 0), 0) : row.baseFare ?? row.amount ?? 0;
+      const discount = row.discount ?? 0;
+      const taxable = Math.max(0, subtotal - discount);
+      const rate = row.taxRate ?? 0;
+      const tax = items.length > 0 || !row.taxAmount ? Math.round(taxable * (rate / 100) * 100) / 100 : row.taxAmount;
+      const total = Math.max(0, taxable + tax);
+      const paid = row.paidAmount ?? 0;
+      billed += total;
+      collected += paid;
+
+      const label = DateTime.fromJSDate(row.invoiceIssuedAt!).setZone(timezone).toFormat('MMM yyyy');
+      const bucket = byMonth.get(label) ?? { billed: 0, collected: 0, count: 0 };
+      bucket.billed += total;
+      bucket.collected += paid;
+      bucket.count += 1;
+      byMonth.set(label, bucket);
+    }
+
+    const currency = (await this.prisma.business.findUnique({ where: { id: user.businessId } }))?.currency || 'INR';
+
+    return {
+      issued: rows.length,
+      billed,
+      collected,
+      outstanding: Math.max(0, billed - collected),
+      currency,
+      byStatus: byStatus.map((s) => ({ status: s.paymentStatus, count: s._count._all })),
+      byMonth: [...byMonth.entries()].map(([month, value]) => ({ month, ...value })),
+    };
+  }
+
   async customers(user: AuthUser) {
     const businessId = user.businessId;
     const [total, perMonthRaw, top] = await Promise.all([
@@ -326,6 +447,16 @@ function auditMessage(a: { action: string; entity: string; user: { name: string 
       return `${name} created template ${(meta.name as string) ?? ''}`.trim();
     case 'RULE_TOGGLED':
       return `${name} toggled an automation rule`;
+    case 'INCOME_CREATED':
+      return `${name} recorded income ${(meta.title as string) ?? ''}`.trim();
+    case 'INCOME_DELETED':
+      return `${name} removed income ${(meta.title as string) ?? ''}`.trim();
+    case 'INVOICE_ISSUED':
+      return `${name} issued invoice ${(meta.invoiceNumber as string) ?? ''}`.trim();
+    case 'INVOICE_PAYMENT_UPDATED':
+      return `${name} updated payment for invoice ${(meta.invoiceNumber as string) ?? ''}`.trim();
+    case 'INVOICE_SENT_VIA_WHATSAPP':
+      return `${name} sent invoice ${(meta.invoiceNumber as string) ?? ''} on WhatsApp`;
     default:
       return `${name} ${a.action.toLowerCase().replace(/_/g, ' ')}`.trim();
   }

@@ -65,8 +65,8 @@ export default function DashboardPage() {
           <StatCard title="Today's Journeys" value={String(stats?.todayJourneys ?? 0)} icon={CalendarCheck} tone="green" sub="departing today" href="/bookings?period=today" />
           <StatCard title="Upcoming Journeys" value={String(stats?.upcomingJourneys ?? 0)} icon={Users} tone="purple" sub="total upcoming" href="/upcoming-journeys" />
           <StatCard title="Messages Sent" value={String(message?.total ?? 0)} icon={MessageCircle} tone="emerald" sub="all time" href="/whatsapp-messages" />
-          <StatCard title="Pending Messages" value={String(stats?.pendingMessages ?? 0)} icon={CalendarCheck} tone="orange" sub="awaiting delivery" href="/whatsapp-messages" />
-          <StatCard title="Failed Messages" value={String(stats?.failedMessages ?? 0)} icon={AlertTriangle} tone="rose" sub="needs attention" href="/whatsapp-messages" />
+          <StatCard title="Pending Messages" value={String(message?.pending ?? 0)} icon={CalendarCheck} tone="orange" sub="awaiting delivery" href="/whatsapp-messages" />
+          <StatCard title="Failed Messages" value={String(message?.failed ?? 0)} icon={AlertTriangle} tone="rose" sub="needs attention" href="/whatsapp-messages" />
         </div>
 
         <div className="grid gap-3 xl:grid-cols-[1.58fr_1fr]">

@@ -109,7 +109,7 @@ export default function SettingsPage() {
     setActionError("");
     setOverrides((o) => ({ ...o, [key]: value }));
     try {
-      await api("/settings", { method: "PATCH", body: JSON.stringify({ [key]: value }) });
+      await api("/settings", { method: "PATCH", body: { [key]: value } });
       setOverrides((o) => { const rest = { ...o }; delete rest[key]; return rest; });
       settings.refetch();
     } catch (err) {
@@ -134,7 +134,7 @@ export default function SettingsPage() {
     if (bizEmail && !/^\S+@\S+\.\S+$/.test(bizEmail)) { setFormError("Enter a valid email address"); return; }
     setSaving(true);
     try {
-      await api("/settings", { method: "PATCH", body: JSON.stringify({ businessName: bizName.trim(), email: bizEmail.trim() || undefined, phone: bizPhone.trim() || undefined, timezone, currency }) });
+      await api("/settings", { method: "PATCH", body: { businessName: bizName.trim(), email: bizEmail.trim() || undefined, phone: bizPhone.trim() || undefined, timezone, currency } });
       setNotice("Business details updated");
       window.setTimeout(() => setNotice(""), 4000);
       settings.refetch();
@@ -165,13 +165,13 @@ export default function SettingsPage() {
     try {
       await api("/settings", {
         method: "PATCH",
-        body: JSON.stringify({
+        body: {
           gstEnabled,
           gstRate: rate,
           gstin: gstin.trim() || undefined,
           invoicePrefix: invoicePrefix.trim() || "INV",
           nextInvoiceNo: next,
-        }),
+        },
       });
       setNotice("Tax & billing settings updated");
       window.setTimeout(() => setNotice(""), 4000);

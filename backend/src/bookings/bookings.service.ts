@@ -102,7 +102,12 @@ export class BookingsService {
       }
       where.OR = or;
     }
-    if (query.status) where.status = query.status;
+    if (query.status) {
+      if (!Object.values(BookingStatus).includes(query.status as BookingStatus)) {
+        throw new BadRequestException({ message: 'Invalid booking status filter', code: 'INVALID_STATUS' });
+      }
+      where.status = query.status;
+    }
     if (query.airline) where.airline = query.airline;
     if (query.customerId) where.customerId = query.customerId;
 
@@ -211,6 +216,7 @@ export class BookingsService {
       where: { id, businessId: user.businessId },
       include: {
         customer: { select: { id: true, name: true, phone: true, email: true } },
+        invoiceItems: { orderBy: { sortOrder: 'asc' } },
         scheduledMessages: {
           orderBy: { scheduledAt: 'asc' },
           include: { template: { select: { id: true, name: true, content: true } } },

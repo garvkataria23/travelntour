@@ -22,9 +22,28 @@ interface OverviewStats {
   };
 }
 interface MessagesReport { total: number; delivered: number; read: number; sent: number; pending: number; failed: number; cancelled: number; deliveryRate: number; readRate: number; failedRate: number }
+interface ExpensesReport {
+  total: number;
+  count: number;
+  currency: string;
+  byCategory: { category: string; total: number; count: number }[];
+  directCost: number;
+  operatingCost: number;
+  byTitle: { title: string; total: number; count: number }[];
+  byMonth: { month: string; total: number; count: number }[];
+}
 interface CustomersReport { total: number; growth: { month: string; count: number }[]; top: { id: string; name: string; phone: string; bookings: number }[] }
 interface RouteRow { route: string; count: number }
 interface AirlineRow { airline: string | null; count: number; revenue: number; share: number }
+interface InvoicesReport {
+  issued: number;
+  billed: number;
+  collected: number;
+  outstanding: number;
+  currency: string;
+  byStatus: { status: string; count: number }[];
+  byMonth: { month: string; billed: number; collected: number; count: number }[];
+}
 
 const STATUS_LABELS: Record<string, string> = {
   CONFIRMED: "Confirmed",
@@ -55,7 +74,7 @@ const SOURCE_COLORS: Record<string, string> = {
   OTHER: "#94a3b8",
 };
 
-const TABS = ["Overview", "Bookings", "Revenue", "Customers", "Communication", "Routes", "Airlines"] as const;
+const TABS = ["Overview", "Bookings", "Revenue", "Customers", "Communication", "Expenses", "Invoicing", "Routes", "Airlines"] as const;
 type Tab = (typeof TABS)[number];
 
 interface BookingExportItem {
@@ -90,6 +109,8 @@ export default function ReportsPage() {
   const revenueRep = useApi<RevenueReport>(`/reports/revenue${rangeQs}`);
   const overviewRep = useApi<OverviewStats>("/reports/overview");
   const messagesRep = useApi<MessagesReport>(`/reports/messages${rangeQs}`);
+  const expensesRep = useApi<ExpensesReport>(`/reports/expenses${rangeQs}`);
+  const invoicesRep = useApi<InvoicesReport>(`/reports/invoices${rangeQs}`);
   const customersRep = useApi<CustomersReport>("/reports/customers");
   const routesRep = useApi<RouteRow[]>("/reports/routes");
   const airlinesRep = useApi<AirlineRow[]>("/reports/airlines");
@@ -310,6 +331,68 @@ export default function ReportsPage() {
               </div>
             ) : null}
 
+            {active === "Expenses" ? (
+              <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <MiniStat label="Total Expenses" value={expensesRep.data ? formatCurrency(expensesRep.data.total, expensesRep.data.currency) : "—"} color="text-[#071333]" />
+                  <MiniStat label="Entries" value={expensesRep.data ? String(expensesRep.data.count) : "—"} color="text-[#405174]" />
+                  <MiniStat label="Direct Cost" value={expensesRep.data ? formatCurrency(expensesRep.data.directCost, expensesRep.data.currency) : "—"} color="text-orange-600" />
+                  <MiniStat label="Operating Cost" value={expensesRep.data ? formatCurrency(expensesRep.data.operatingCost, expensesRep.data.currency) : "—"} color="text-[#596782]" />
+                </div>
+                <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr]">
+                  <Card title={`Expense Trend (${expensesRep.data?.currency ?? "INR"})`}>
+                    <ExpenseMonthly byMonth={expensesRep.data?.byMonth ?? []} max={Math.max(1, ...(expensesRep.data?.byMonth ?? []).map((b) => b.total))} currency={expensesRep.data?.currency ?? undefined} />
+                    <p className="mt-1 text-xs text-[#596782]">{from || to ? "in selected range" : "all time"}</p>
+                  </Card>
+                  <Card title="By Category">
+                    <div className="space-y-3">
+                      {(expensesRep.data?.byCategory.length ? expensesRep.data.byCategory : []).map((c) => <StatusBar key={c.category} label={c.category} count={c.count} total={expensesRep.data?.count ?? 1} color={c.category === "DIRECT" ? "#fb8500" : "#8a97ad"} />)}
+                      {!expensesRep.data?.byCategory.length ? <p className="text-sm text-[#596782]">No data</p> : null}
+                    </div>
+                    <div className="mt-3 space-y-1 border-t border-[#e5edf6] pt-3 text-sm">
+                      <p className="flex justify-between text-[#405174]"><span>Direct (COGS)</span><b>{formatCurrency(expensesRep.data?.directCost ?? 0, expensesRep.data?.currency)}</b></p>
+                      <p className="flex justify-between text-[#405174]"><span>Operating (overheads)</span><b>{formatCurrency(expensesRep.data?.operatingCost ?? 0, expensesRep.data?.currency)}</b></p>
+                    </div>
+                  </Card>
+                  <Card title="Top Expense Heads">
+                    <div className="divide-y divide-[#e5edf6]">
+                      {(expensesRep.data?.byTitle ?? []).map((t) => (
+                        <div key={t.title} className="flex items-center justify-between gap-2 py-2 text-sm">
+                          <span className="min-w-0 truncate font-semibold text-[#405174]">{t.title}</span>
+                          <span className="shrink-0 text-xs text-[#8a97ad]">×{t.count}</span>
+                          <b className="shrink-0">{formatCurrency(t.total, expensesRep.data?.currency)}</b>
+                        </div>
+                      ))}
+                      {!expensesRep.data?.byTitle.length ? <p className="py-4 text-center text-sm text-[#596782]">No expense data yet.</p> : null}
+                    </div>
+                  </Card>
+                </div>
+              </div>
+            ) : null}
+
+            {active === "Invoicing" ? (
+              <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <MiniStat label="Invoices Issued" value={invoicesRep.data ? String(invoicesRep.data.issued) : "—"} color="text-[#071333]" />
+                  <MiniStat label="Total Billed" value={invoicesRep.data ? formatCurrency(invoicesRep.data.billed, invoicesRep.data.currency) : "—"} color="text-[#405174]" />
+                  <MiniStat label="Collected" value={invoicesRep.data ? formatCurrency(invoicesRep.data.collected, invoicesRep.data.currency) : "—"} color="text-emerald-600" />
+                  <MiniStat label="Outstanding" value={invoicesRep.data ? formatCurrency(invoicesRep.data.outstanding, invoicesRep.data.currency) : "—"} color="text-rose-600" />
+                </div>
+                <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
+                  <Card title={`Billing & Collections (${invoicesRep.data?.currency ?? "INR"})`}>
+                    <InvoiceMonthly byMonth={invoicesRep.data?.byMonth ?? []} max={Math.max(1, ...(invoicesRep.data?.byMonth ?? []).map((b) => b.billed))} currency={invoicesRep.data?.currency ?? undefined} />
+                    <p className="mt-1 text-xs text-[#596782]">{from || to ? "in selected range" : "all time"}</p>
+                  </Card>
+                  <Card title="By Payment Status">
+                    <div className="space-y-3">
+                      {(invoicesRep.data?.byStatus ?? []).map((s) => <StatusBar key={s.status} label={s.status} count={s.count} total={invoicesRep.data?.issued ?? 1} color={s.status === "PAID" ? "#059669" : s.status === "PARTIAL" ? "#fb8500" : "#f43f5e"} />)}
+                      {!invoicesRep.data?.byStatus.length ? <p className="py-4 text-center text-sm text-[#596782]">No invoices yet in this range.</p> : null}
+                    </div>
+                  </Card>
+                </div>
+              </div>
+            ) : null}
+
             {active === "Routes" ? (
               <Card title="All Routes">
                 <div className="space-y-3">
@@ -422,6 +505,44 @@ function StatusBar({ label, count, total, color }: { label: string; count: numbe
       <span className="truncate text-[#405174]">{label}</span>
       <span className="h-2 rounded bg-[#e5edf6]"><span className="block h-2 rounded" style={{ width: `${Math.max(2, pct)}%`, background: color ?? "#1688f9" }} /></span>
       <span className="text-right text-[#596782]">{count} · {pct}%</span>
+    </div>
+  );
+}
+
+function ExpenseMonthly({ byMonth, max, currency }: { byMonth: { month: string; total: number; count: number }[]; max: number; currency?: string }) {
+  return (
+    <div>
+      <div className="flex h-40 items-end gap-2 border-l border-b border-[#dce7f4] px-4">
+        {byMonth.map((b) => (
+          <div key={b.month} className="group flex h-full flex-1 flex-col items-center justify-end gap-1" title={`${b.month}: ${formatCurrency(b.total, currency)} · ${b.count} entry${b.count === 1 ? "" : "s"}`}>
+            <span className="text-[10px] font-bold text-[#405174] opacity-0 transition group-hover:opacity-100">{formatCurrency(b.total, currency)}</span>
+            <span className="w-full rounded-t bg-orange-400" style={{ height: `${Math.max(2, Math.round((b.total / max) * 100))}%` }} />
+          </div>
+        ))}
+        {!byMonth.length ? <p className="w-full py-10 text-center text-sm text-[#596782]">No expense data.</p> : null}
+      </div>
+      <div className="mt-1 flex justify-between px-4 text-[11px] text-[#596782]"><span>{byMonth[0]?.month ?? ""}</span><span>{byMonth[byMonth.length - 1]?.month ?? ""}</span></div>
+    </div>
+  );
+}
+
+function InvoiceMonthly({ byMonth, max, currency }: { byMonth: { month: string; billed: number; collected: number; count: number }[]; max: number; currency?: string }) {
+  return (
+    <div>
+      <div className="flex h-40 items-end gap-3 border-l border-b border-[#dce7f4] px-4">
+        {byMonth.map((b) => (
+          <div key={b.month} className="group flex h-full flex-1 items-end justify-center gap-1" title={`${b.month}: billed ${formatCurrency(b.billed, currency)} · collected ${formatCurrency(b.collected, currency)} · ${b.count} invoice${b.count === 1 ? "" : "s"}`}>
+            <span className="w-1/2 max-w-[14px] rounded-t bg-[#1688f9]" style={{ height: `${b.billed > 0 ? Math.max(3, (b.billed / max) * 100) : 0}%` }} />
+            <span className="w-1/2 max-w-[14px] rounded-t bg-[#059669]" style={{ height: `${b.collected > 0 ? Math.max(3, (b.collected / max) * 100) : 0}%` }} />
+          </div>
+        ))}
+        {!byMonth.length ? <p className="w-full py-10 text-center text-sm text-[#596782]">No invoice data.</p> : null}
+      </div>
+      <div className="mt-1 flex justify-between px-4 text-[11px] text-[#596782]"><span>{byMonth[0]?.month ?? ""}</span><span>{byMonth[byMonth.length - 1]?.month ?? ""}</span></div>
+      <div className="mt-2 flex items-center justify-end gap-4 px-4 text-xs text-[#596782]">
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#1688f9]" />Billed</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#059669]" />Collected</span>
+      </div>
     </div>
   );
 }

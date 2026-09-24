@@ -99,7 +99,7 @@ export function initialsOf(name: string): string {
     .toUpperCase();
 }
 
-export function BookingsTable({ compact = false, rows: apiRows, onView, onCancel }: { compact?: boolean; rows: ApiBookingRow[]; onView?: (id: string) => void; onCancel?: (id: string) => void }) {
+export function BookingsTable({ compact = false, rows: apiRows, onView, onCancel, onEdit }: { compact?: boolean; rows: ApiBookingRow[]; onView?: (id: string) => void; onCancel?: (id: string) => void; onEdit?: (id: string) => void }) {
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const rows = apiRows.map((row) => {
     const initial = initialsOf(row.customerName);
@@ -152,6 +152,7 @@ export function BookingsTable({ compact = false, rows: apiRows, onView, onCancel
                     <button onClick={() => setMenuRow(menuRow === row.key ? null : row.key)} className="grid h-10 w-10 place-items-center rounded-lg border border-[#d4dfed]" aria-label="More actions"><MoreHorizontal className="h-4 w-4" /></button>
                     {menuRow === row.key ? <div className="absolute right-0 top-11 z-20 w-44 overflow-hidden rounded-lg border border-[#dce7f4] bg-white shadow-xl">
                       <Link href={`/bookings?search=${encodeURIComponent(row.pnr)}`} onClick={() => setMenuRow(null)} className="block px-4 py-2.5 text-sm font-medium hover:bg-slate-50">Open booking</Link>
+                      <button onClick={() => { setMenuRow(null); onEdit?.(row.key); }} className="block w-full px-4 py-2.5 text-left text-sm font-medium hover:bg-slate-50">Edit booking</button>
                       {row.id ? <Link href={`/bookings/${row.id}/invoice`} onClick={() => setMenuRow(null)} className="block px-4 py-2.5 text-sm font-medium hover:bg-slate-50">Print invoice</Link> : null}
                       <button onClick={() => { setMenuRow(null); onCancel?.(row.key); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-rose-600 hover:bg-rose-50"><Trash2 className="h-4 w-4" />Cancel booking</button>
                     </div> : null}
@@ -175,8 +176,8 @@ export function BookingFilters({ search, onSearch, status, onStatus, airlines = 
         <option value="">All Status</option>
         <option value="CONFIRMED">Confirmed</option>
         <option value="PENDING">Pending</option>
+        <option value="COMPLETED">Completed</option>
         <option value="CANCELLED">Cancelled</option>
-        <option value="FAILED">Failed</option>
       </select>
       <select value={airline} onChange={(event) => onAirline?.(event.target.value)} className="h-11 rounded-lg border border-[#d6e1ef] bg-white px-4 text-sm shadow-sm outline-none">
         <option value="">All Airlines</option>

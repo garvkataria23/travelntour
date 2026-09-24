@@ -212,10 +212,10 @@ export default function MessageTemplatesPage() {
     setActionError("");
     try {
       if (editing) {
-        await api(`/templates/${editing.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+        await api(`/templates/${editing.id}`, { method: "PATCH", body: payload });
         showNotice(`${payload.name} updated`);
       } else {
-        await api("/templates", { method: "POST", body: JSON.stringify(payload) });
+        await api("/templates", { method: "POST", body: payload });
         showNotice(`${payload.name} created`);
       }
       setCreateOpen(false);
@@ -465,7 +465,7 @@ function TestModal({ template, customers, onClose, onDone }: { template: Templat
     if (!customerId) { setError("Koi customer select karein"); return; }
     setSending(true);
     try {
-      await api("/messages", { method: "POST", body: JSON.stringify({ customerId, text: rendered }) });
+      await api("/messages", { method: "POST", body: { customerId, text: rendered } });
       onDone(`Test message sent to ${customer?.name}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to send test message");

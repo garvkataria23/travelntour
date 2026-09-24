@@ -4,10 +4,11 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { BookingFilters, BookingToolbar, BookingsTable, Pagination, StatCard, initialsOf, type ApiBookingRow } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatDate } from "@/lib/api";
-import { Plane, CalendarCheck, Users, Hourglass, AlertTriangle, PlaneTakeoff, PlaneLanding, Printer, X } from "lucide-react";
+import { Plane, CalendarCheck, Users, Hourglass, AlertTriangle, PlaneTakeoff, PlaneLanding, Printer, Pencil, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
+import { FormEvent } from "react";
 
 interface BookingStats {
   total: number;
@@ -80,6 +81,8 @@ function BookingsPageInner() {
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState(initial.search);
   const [viewId, setViewId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [rescheduleId, setRescheduleId] = useState<string | null>(null);
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [toast, setToast] = useState("");
   const [actionError, setActionError] = useState("");
@@ -212,19 +215,21 @@ function BookingsPageInner() {
           onReset={resetFilters}
         />
         <section className="overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-[0_10px_24px_rgba(31,61,105,0.04)]">
-          <BookingsTable rows={list.data?.items ?? []} onView={(id) => setViewId(id)} onCancel={(id) => setCancelId(id)} />
+          <BookingsTable rows={list.data?.items ?? []} onView={(id) => setViewId(id)} onCancel={(id) => setCancelId(id)} onEdit={(id) => setEditId(id)} />
           <Pagination total={list.data?.meta.total} page={list.data?.meta.page ?? 1} limit={limit} onPageChange={(p) => setPage(p)} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
         </section>
       </div>
 
-      {viewId ? <BookingDetailModal id={viewId} data={detail.data} loading={detail.loading} onClose={() => setViewId(null)} /> : null}
+      {viewId ? <BookingDetailModal id={viewId} data={detail.data} loading={detail.loading} onClose={() => setViewId(null)} onEdit={(id) => { setViewId(null); setEditId(id); }} onReschedule={(id) => { setViewId(null); setRescheduleId(id); }} /> : null}
+      {editId ? <EditBookingModal id={editId} onClose={() => setEditId(null)} onSaved={() => { setEditId(null); setToast("Booking updated."); stats.refetch(); list.refetch(); }} /> : null}
+      {rescheduleId ? <RescheduleModal id={rescheduleId} onClose={() => setRescheduleId(null)} onSaved={() => { setRescheduleId(null); setToast("Journey rescheduled."); stats.refetch(); list.refetch(); }} /> : null}
       {cancelId ? <ConfirmDialog title="Cancel booking?" message="This will mark the booking as cancelled and notify the customer. This action cannot be undone." confirmLabel="Cancel booking" onCancel={() => setCancelId(null)} onConfirm={() => handleCancel(cancelId)} /> : null}
       {toast ? <div className="fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-lg bg-[#071832] px-5 py-3 text-sm font-semibold text-white shadow-2xl">{toast}</div> : null}
     </AppShell>
   );
 }
 
-function BookingDetailModal({ id, data, loading, onClose }: { id: string; data: BookingDetail | null; loading: boolean; onClose: () => void }) {
+function BookingDetailModal({ id, data, loading, onClose, onEdit, onReschedule }: { id: string; data: BookingDetail | null; loading: boolean; onClose: () => void; onEdit?: (id: string) => void; onReschedule?: (id: string) => void }) {
   const booking = data;
   return (
     <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/50 p-4" onClick={onClose}>
@@ -233,6 +238,8 @@ function BookingDetailModal({ id, data, loading, onClose }: { id: string; data: 
           <div><h3 className="text-lg font-extrabold">Booking Details</h3><p className="text-sm text-[#596782]">PNR {booking?.pnr ?? id}</p></div>
           <div className="flex items-center gap-2">
             {booking?.invoiceNumber ? <span className="rounded-md bg-[#eef6ff] px-3 py-1.5 text-xs font-bold text-[#087df0]">{booking.invoiceNumber}</span> : null}
+            {booking?.status !== "CANCELLED" ? <button onClick={() => onEdit?.(id)} className="flex h-9 items-center gap-2 rounded-lg border border-[#d6e1ef] px-4 text-sm font-bold text-[#405174]"><Pencil className="h-4 w-4" />Edit</button> : null}
+            {booking?.status !== "CANCELLED" ? <button onClick={() => onReschedule?.(id)} className="flex h-9 items-center gap-2 rounded-lg bg-[#fb8500] px-4 text-sm font-bold text-white">Reschedule</button> : null}
             <Link href={`/bookings/${id}/invoice`} className="flex h-9 items-center gap-2 rounded-lg bg-[#1688f9] px-4 text-sm font-bold text-white"><Printer className="h-4 w-4" />Invoice</Link>
             <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef]" aria-label="Close"><X className="h-4 w-4" /></button>
           </div>
@@ -271,6 +278,150 @@ function detailRow(label: string, value: string) {
 function formatCurrency(amount: number | null | undefined, currency: string | null | undefined) {
   if (amount === null || amount === undefined) return "—";
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: currency || "INR", maximumFractionDigits: 0 }).format(amount);
+}
+
+function EditBookingModal({ id, onClose, onSaved }: { id: string; onClose: () => void; onSaved: () => void }) {
+  const detail = useApi<BookingDetail>(`/bookings/${id}`);
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/50 p-4" onClick={onClose}>
+      <div className="max-h-[85vh] w-full max-w-[560px] overflow-y-auto rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="sticky top-0 flex items-center justify-between border-b border-[#e5edf6] bg-white px-5 py-4">
+          <div><h3 className="text-lg font-extrabold">Edit Booking</h3><p className="text-sm text-[#596782]">PNR {detail.data?.pnr ?? id}</p></div>
+          <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef]" aria-label="Close"><X className="h-4 w-4" /></button>
+        </div>
+        {detail.loading ? <div className="px-5 py-10 text-center text-sm text-[#596782]">Loading booking…</div> : !detail.data ? <div className="px-5 py-10 text-center text-sm text-rose-600">{detail.error ?? "Booking not found."}</div> : (
+          <BookingEditForm booking={detail.data} onClose={onClose} onSaved={onSaved} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BookingEditForm({ booking, onClose, onSaved }: { booking: BookingDetail; onClose: () => void; onSaved: () => void }) {
+  const [status, setStatus] = useState(booking.status);
+  const [amount, setAmount] = useState(booking.amount ? String(booking.amount) : "");
+  const [pnr, setPnr] = useState(booking.pnr);
+  const [referenceNumber, setReferenceNumber] = useState(booking.referenceNumber ?? "");
+  const [flightNumber, setFlightNumber] = useState(booking.flightNumber ?? "");
+  const [airline, setAirline] = useState(booking.airline ?? "");
+  const [fromPort, setFromPort] = useState(booking.fromAirport ?? booking.fromCity ?? "");
+  const [toPort, setToPort] = useState(booking.toAirport ?? booking.toCity ?? "");
+  const [departureDate, setDepartureDate] = useState(booking.departureDate ? localISODate(new Date(booking.departureDate)) : "");
+  const [departureTime, setDepartureTime] = useState(booking.departureTime ?? "");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    if (!departureDate) { setError("Departure date is required."); return; }
+    setSubmitting(true);
+    try {
+      await api(`/bookings/${booking.id}`, {
+        method: "PATCH",
+        body: {
+          status,
+          ...(amount ? { amount: Number(amount) } : {}),
+          pnr: pnr.trim(),
+          referenceNumber: referenceNumber.trim() || undefined,
+          flightNumber: flightNumber.trim(),
+          airline: airline.trim(),
+          from: fromPort.trim(),
+          to: toPort.trim(),
+          departureDate,
+          departureTime: departureTime.trim() || undefined,
+        },
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update booking.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4 px-5 py-5">
+      {error ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</p> : null}
+      <div>
+        <span className="mb-2 block text-sm font-semibold">Status</span>
+        <div className="grid grid-cols-3 gap-2">
+          {["CONFIRMED", "PENDING", "COMPLETED"].map((option) => (
+            <button key={option} type="button" onClick={() => setStatus(option)} className={`rounded-lg border px-3 py-3 text-sm font-bold capitalize ${status === option ? "border-[#1688f9] bg-[#eef6ff] ring-2 ring-blue-100" : "border-[#d6e1ef]"}`}>{option.toLowerCase()}</button>
+          ))}
+        </div>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block"><span className="mb-2 block text-sm font-semibold">PNR *</span><input value={pnr} onChange={(event) => setPnr(event.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+        <label className="block"><span className="mb-2 block text-sm font-semibold">Reference No.</span><input value={referenceNumber} onChange={(event) => setReferenceNumber(event.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block"><span className="mb-2 block text-sm font-semibold">Flight Number</span><input value={flightNumber} onChange={(event) => setFlightNumber(event.target.value)} placeholder="e.g. 6E-123" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+        <label className="block"><span className="mb-2 block text-sm font-semibold">Airline</span><input value={airline} onChange={(event) => setAirline(event.target.value)} placeholder="e.g. IndiGo" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block"><span className="mb-2 block text-sm font-semibold">From</span><input value={fromPort} onChange={(event) => setFromPort(event.target.value)} placeholder="e.g. DEL" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+        <label className="block"><span className="mb-2 block text-sm font-semibold">To</span><input value={toPort} onChange={(event) => setToPort(event.target.value)} placeholder="e.g. BOM" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block"><span className="mb-2 block text-sm font-semibold">Departure Date *</span><input type="date" value={departureDate} onChange={(event) => setDepartureDate(event.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+        <label className="block"><span className="mb-2 block text-sm font-semibold">Departure Time</span><input value={departureTime} onChange={(event) => setDepartureTime(event.target.value)} placeholder="e.g. 10:30 AM" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+      </div>
+      <label className="block"><span className="mb-2 block text-sm font-semibold">Amount (₹)</span><input type="number" min="0" value={amount} onChange={(event) => setAmount(event.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+      <p className="text-xs text-[#65728a]">Changing the journey date/time automatically reschedules WhatsApp reminders for the customer.</p>
+      <div className="flex justify-end gap-3 pt-2">
+        <button type="button" onClick={onClose} className="h-11 rounded-lg border border-[#d6e1ef] px-6 font-semibold text-[#405174]">Cancel</button>
+        <button type="submit" disabled={submitting} className="h-11 rounded-lg bg-[#1688f9] px-6 font-bold text-white disabled:opacity-60">{submitting ? "Saving..." : "Save Changes"}</button>
+      </div>
+    </form>
+  );
+}
+
+function RescheduleModal({ id, onClose, onSaved }: { id: string; onClose: () => void; onSaved: () => void }) {
+  const detail = useApi<BookingDetail>(`/bookings/${id}`);
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    if (!date) { setError("Select a new departure date."); return; }
+    setSubmitting(true);
+    try {
+      await api(`/bookings/${id}/reschedule`, {
+        method: "POST",
+        body: { departureDate: date, ...(time.trim() ? { departureTime: time.trim() } : {}) },
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to reschedule booking.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-[420px] rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-[#e5edf6] px-5 py-4">
+          <div><h3 className="text-lg font-extrabold">Reschedule Journey</h3><p className="text-sm text-[#596782]">PNR {detail.data?.pnr ?? id}</p></div>
+          <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef]" aria-label="Close"><X className="h-4 w-4" /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4 p-5">
+          {error ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</p> : null}
+          <label className="block"><span className="mb-2 block text-sm font-semibold">New Departure Date *</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+          <label className="block"><span className="mb-2 block text-sm font-semibold">Departure Time</span><input value={time} onChange={(event) => setTime(event.target.value)} placeholder="e.g. 09:45 PM" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+          <p className="text-xs text-[#65728a]">Reminders for the previous date are cancelled and re-scheduled for the new journey date.</p>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="h-11 rounded-lg border border-[#d6e1ef] px-6 font-semibold text-[#405174]">Cancel</button>
+            <button type="submit" disabled={submitting} className="h-11 rounded-lg bg-[#fb8500] px-6 font-bold text-white disabled:opacity-60">{submitting ? "Saving..." : "Reschedule"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }
 
 function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm }: { title: string; message: string; confirmLabel: string; onCancel: () => void; onConfirm: () => void }) {

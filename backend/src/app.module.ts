@@ -10,6 +10,8 @@ import { BusinessesModule } from './businesses/businesses.module';
 import { CustomersModule } from './customers/customers.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { HealthModule } from './health/health.module';
+import { IncomeModule } from './income/income.module';
+import { InvoicesModule } from './invoices/invoices.module';
 import { MessagesModule } from './messages/messages.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { QueueModule } from './queue/queue.module';
@@ -47,6 +49,8 @@ import { JwtAuthGuard } from './common/jwt-auth.guard';
     SettingsModule,
     SearchModule,
     ExpensesModule,
+    IncomeModule,
+    InvoicesModule,
     HealthModule,
   ],
   providers: [

@@ -41,6 +41,22 @@ export class ReportsController {
     return this.reportsService.messages(user, query);
   }
 
+  @Get('expenses')
+  expenses(
+    @CurrentUser() user: AuthUser,
+    @Query() query: { from?: string; to?: string },
+  ) {
+    return this.reportsService.expenses(user, query);
+  }
+
+  @Get('invoices')
+  invoices(
+    @CurrentUser() user: AuthUser,
+    @Query() query: { from?: string; to?: string },
+  ) {
+    return this.reportsService.invoicesReport(user, query);
+  }
+
   @Get('customers')
   customers(@CurrentUser() user: AuthUser) {
     return this.reportsService.customers(user);

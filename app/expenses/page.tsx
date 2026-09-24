@@ -37,7 +37,9 @@ interface ExpenseStats {
 export default function ExpensesPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const list = useApi<ExpenseList>(`/expenses?${search ? `search=${encodeURIComponent(search)}` : ""}`);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const list = useApi<ExpenseList>(`/expenses?${search ? `search=${encodeURIComponent(search)}` : ""}${from ? `&from=${encodeURIComponent(from)}` : ""}${to ? `&to=${encodeURIComponent(to)}` : ""}`);
   const stats = useApi<ExpenseStats>("/expenses/stats");
   const [actionError, setActionError] = useState("");
   const [toast, setToast] = useState("");
@@ -78,8 +80,10 @@ export default function ExpensesPage() {
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{statCards.map((s) => <StatCard key={s.title} {...s} />)}</div>
 
         <section className="overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-[0_10px_24px_rgba(31,61,105,0.04)]">
-          <div className="flex items-center gap-3 border-b border-[#e5edf6] p-4">
+          <div className="flex flex-col gap-3 border-b border-[#e5edf6] p-4 lg:flex-row lg:items-center">
             <div className="flex h-11 flex-1 items-center gap-3 rounded-lg border border-[#d6e1ef] px-3"><Search className="h-4 w-4 text-[#65728a]" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by title, payable to or note..." className="min-w-0 flex-1 bg-transparent text-sm outline-none" /></div>
+            <div className="flex h-11 items-center gap-2 rounded-lg border border-[#d6e1ef] px-3"><CalendarDays className="h-4 w-4 shrink-0 text-[#65728a]" /><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm outline-none" aria-label="From date" /><span className="text-[#65728a]">→</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm outline-none" aria-label="To date" /></div>
+            <button onClick={() => { setSearch(""); setFrom(""); setTo(""); }} className="h-11 rounded-lg border border-[#d6e1ef] bg-white px-5 text-sm font-semibold">Reset</button>
           </div>
           {list.error ? <p className="px-5 py-6 text-center text-sm text-rose-600">{list.error}</p> : null}
           {!list.loading && list.data && list.data.items.length === 0 ? <p className="px-5 py-12 text-center text-sm text-[#596782]">No expenses recorded yet. Add your first expense to start tracking profit.</p> : null}

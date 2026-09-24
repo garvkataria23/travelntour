@@ -21,6 +21,15 @@ body {
   background: #e9f4ff;
 }
 
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 button,
 input {
   font: inherit;
@@ -85,10 +94,10 @@ input {
     margin-top: 0;
   }
 
-  .flyconnect-app aside nav a {
-    height: 42px;
-    padding-top: 9px;
-    padding-bottom: 9px;
+.flyconnect-app aside nav a {
+    height: 38px;
+    padding-top: 7px;
+    padding-bottom: 7px;
   }
 
   .flyconnect-app table th,
