@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -84,6 +85,7 @@ export class CreateBookingDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @Min(0)
   amount?: number;
 
   @IsOptional()
@@ -94,26 +96,31 @@ export class CreateBookingDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @Min(0)
   baseFare?: number; // gross fare (taxable value) before discount
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @Min(0)
   cost?: number; // direct cost of the ticket (COGS)
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @Min(0)
   discount?: number; // ₹ discount applied to baseFare
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @Min(0)
   taxRate?: number; // GST % for this booking (defaults to business setting)
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @Min(0)
   taxAmount?: number; // GST amount (let backend compute if omitted)
 
   @IsOptional()

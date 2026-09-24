@@ -121,7 +121,7 @@ export default function DashboardPage() {
               </div>
             </div>
           </SectionCard>
-          <SectionCard title="Recent Activity" action={<a className="text-sm font-bold text-[#087df0]" href="/settings">View All →</a>}>
+          <SectionCard title="Recent Activity" subtitle="Latest system activity across bookings and customers">
             <div className="divide-y divide-[#e5edf6] px-4 pb-3">
               {(overview.data?.activities ?? []).map((item) => <ActivityRow key={item.id} action={item.action} title={item.message} time={formatDate(item.createdAt, true)} />)}
               {(overview.data?.activities ?? []).length === 0 ? <p className="px-2 py-6 text-center text-sm text-[#596782]">No recent activity.</p> : null}

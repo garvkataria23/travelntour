@@ -328,9 +328,15 @@ export class InvoicesService {
     const booking = await this.loadInvoice(user, id);
     const totals = this.computeTotals(booking as Booking, booking.invoiceItems as InvoiceItem[]);
 
-    let paidAmount = dto.paidAmount ?? booking.paidAmount ?? 0;
+    let paidAmount = Math.min(dto.paidAmount ?? booking.paidAmount ?? 0, totals.total);
     if (dto.status === 'PAID') paidAmount = totals.total;
     if (dto.status === 'UNPAID') paidAmount = 0;
+    if (dto.status === 'PARTIAL' && (paidAmount <= 0 || paidAmount >= totals.total)) {
+      throw new BadRequestException({
+        message: 'Partial payment must be greater than 0 and less than the invoice total',
+        code: 'PARTIAL_AMOUNT_INVALID',
+      });
+    }
 
     const updated = await this.prisma.booking.update({
       where: { id },

@@ -75,16 +75,26 @@ export class WhatsAppSendWorker implements OnModuleInit, OnApplicationShutdown {
     const context = bookingTemplateContext(message.booking, message.booking.customer, message.booking.business.timezone);
     const rendered = this.templates.render(message.template, context);
 
+    const isManual = message.messageType === 'CUSTOM' && message.template.name === 'Manual Message';
+
     try {
-      const templateName =
-        message.template.whatsappTemplateName?.trim() ||
-        message.template.name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-      const result = await this.whatsapp.sendTemplate({
-        to: message.booking.customer.phone,
-        templateName,
-        language: message.template.language || 'en',
-        bodyVariables: templateBodyValues(message.template.variables, context),
-      });
+      let result: { waMessageId: string };
+      if (isManual) {
+        result = await this.whatsapp.sendText({
+          to: message.booking.customer.phone,
+          body: (message.renderedContent || rendered).trim(),
+        });
+      } else {
+        const templateName =
+          message.template.whatsappTemplateName?.trim() ||
+          message.template.name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        result = await this.whatsapp.sendTemplate({
+          to: message.booking.customer.phone,
+          templateName,
+          language: message.template.language || 'en',
+          bodyVariables: templateBodyValues(message.template.variables, context),
+        });
+      }
 
       await this.prisma.scheduledMessage.update({
         where: { id: message.id },

@@ -1,11 +1,11 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import Link from "next/link";
+import { BackLink } from "@/components/dashboard/back-link";
 import { useApi } from "@/lib/hooks";
 import { api, formatCurrency } from "@/lib/api";
 import { FormEvent, useState } from "react";
-import { ArrowLeft, Banknote, CheckCircle2, Download, MessageCircle, Pencil, Plane, Plus, Printer, Send, Trash2, X } from "lucide-react";
+import { Banknote, CheckCircle2, Download, MessageCircle, Pencil, Plane, Plus, Printer, Send, Trash2, X } from "lucide-react";
 
 interface InvoiceItem {
   id: string;
@@ -124,7 +124,7 @@ export default function BookingInvoicePage() {
       <style>{`@media print { .no-print { display: none !important; } body { background: #fff; } } @page { margin: 12mm; }`}</style>
       <header className="no-print sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-[#dce7f4] bg-white/95 px-4 py-3 backdrop-blur sm:px-8">
         <div className="flex items-center gap-3">
-          <Link href="/invoices" className="flex items-center gap-2 text-sm font-semibold text-[#405174]"><ArrowLeft className="h-4 w-4" />Invoices</Link>
+          <BackLink href="/invoices" className="text-sm font-semibold text-[#405174]">Invoices</BackLink>
           <span className="text-[#c8d2e2]">/</span>
           <span className="text-sm font-semibold text-[#405174]">{data?.invoiceNumber ?? "Invoice"}</span>
           {data ? <PaymentStatusBadge value={data.paymentStatus} /> : null}

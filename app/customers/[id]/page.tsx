@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
+import { BackLink } from "@/components/dashboard/back-link";
 import { StatCard, StatusBadge, initialsOf } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatCurrency, formatDate, statusTone } from "@/lib/api";
@@ -127,7 +128,7 @@ export default function CustomerDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-3 sm:grid-cols-2">
-            <Link href="/customers" className="py-3 text-[#087df0]">← Back to Customers</Link>
+            <BackLink href="/customers" className="py-3 text-[#087df0]">Back to Customers</BackLink>
             <button onClick={() => setEditOpen(true)} className="rounded-lg border border-[#d6e1ef] bg-white px-7 py-3 font-bold"><Edit className="mr-2 inline h-4 w-4" />Edit Customer</button>
             <Link href="/bookings/add" className="rounded-lg bg-[#1688f9] px-7 py-3 font-bold text-white"><Plus className="mr-2 inline h-4 w-4" />New Booking</Link>
             <Link href="/whatsapp-messages" className="rounded-lg border border-[#d6e1ef] bg-white px-7 py-3 font-bold"><MessageCircle className="mr-2 inline h-4 w-4 text-green-600" />Send WhatsApp</Link>

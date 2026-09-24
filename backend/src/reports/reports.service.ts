@@ -78,15 +78,23 @@ export class ReportsService {
       createdAt: a.createdAt,
     }));
 
-    const revenueTotal = (await this.prisma.booking.aggregate({
-      where: { businessId, status: { not: 'CANCELLED' }, amount: { not: null } },
-      _sum: { amount: true },
-    }))._sum.amount ?? 0;
-    const manualIncome =
-      (await this.prisma.income.aggregate({ where: { businessId }, _sum: { amount: true } }))._sum.amount ?? 0;
-    const totalIncome = (revenueTotal ?? 0) + manualIncome;
-    const expenseAgg = await this.prisma.expense.groupBy({ by: ['category'], where: { businessId }, _sum: { amount: true } });
-    const directCost = expenseAgg.find((e) => e.category === 'DIRECT')?._sum.amount ?? 0;
+    const [revenueAgg, manualIncomeAgg, bookingCostAgg, expenseAgg] = await Promise.all([
+      this.prisma.booking.aggregate({
+        where: { businessId, status: { not: 'CANCELLED' }, amount: { not: null } },
+        _sum: { amount: true },
+      }),
+      this.prisma.income.aggregate({ where: { businessId }, _sum: { amount: true } }),
+      this.prisma.booking.aggregate({
+        where: { businessId, status: { not: 'CANCELLED' }, cost: { not: null } },
+        _sum: { cost: true },
+      }),
+      this.prisma.expense.groupBy({ by: ['category'], where: { businessId }, _sum: { amount: true } }),
+    ]);
+    const revenueTotal = revenueAgg._sum.amount ?? 0;
+    const manualIncome = manualIncomeAgg._sum.amount ?? 0;
+    const ticketCost = bookingCostAgg._sum.cost ?? 0;
+    const totalIncome = revenueTotal + manualIncome;
+    const directCost = (expenseAgg.find((e) => e.category === 'DIRECT')?._sum.amount ?? 0) + ticketCost;
     const operatingCost = expenseAgg.find((e) => e.category === 'OPERATING')?._sum.amount ?? 0;
 
     return {
@@ -94,9 +102,10 @@ export class ReportsService {
         totalBookings,
         todayJourneys,
         upcomingJourneys,
-        revenue: revenueTotal ?? 0,
+        revenue: revenueTotal,
         manualIncome,
         totalIncome,
+        ticketCost,
         directCost,
         operatingCost,
         grossProfit: totalIncome - directCost,
@@ -327,7 +336,7 @@ export class ReportsService {
       const rate = row.taxRate ?? 0;
       const tax = items.length > 0 || !row.taxAmount ? Math.round(taxable * (rate / 100) * 100) / 100 : row.taxAmount;
       const total = Math.max(0, taxable + tax);
-      const paid = row.paidAmount ?? 0;
+      const paid = Math.min(row.paidAmount ?? 0, total);
       billed += total;
       collected += paid;
 

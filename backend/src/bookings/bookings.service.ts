@@ -436,6 +436,23 @@ export class BookingsService {
       data.customerId = dto.customerId;
     }
 
+    // Accounting: recompute GST when fare / discount / rate change so invoice totals stay correct.
+    const accountingChanged =
+      dto.baseFare !== undefined || dto.discount !== undefined || dto.taxRate !== undefined || dto.taxAmount !== undefined;
+    if (accountingChanged) {
+      const baseFare = dto.baseFare ?? existing.baseFare ?? existing.amount ?? 0;
+      const discount = dto.discount ?? existing.discount ?? 0;
+      const taxRate = dto.taxRate ?? existing.taxRate ?? 0;
+      if (dto.baseFare !== undefined) data.baseFare = dto.baseFare;
+      if (dto.discount !== undefined) data.discount = dto.discount;
+      if (dto.taxRate !== undefined) data.taxRate = dto.taxRate;
+      if (dto.taxAmount !== undefined) {
+        data.taxAmount = dto.taxAmount;
+      } else if (dto.taxRate !== undefined || dto.baseFare !== undefined || dto.discount !== undefined) {
+        data.taxAmount = taxRate > 0 ? Math.round(Math.max(0, baseFare - discount) * (taxRate / 100) * 100) / 100 : 0;
+      }
+    }
+
     const updated = await this.prisma.$transaction(async (tx) => {
       const booking = await tx.booking.update({
         where: { id },

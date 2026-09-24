@@ -142,8 +142,8 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
           {
             description: 'Flight ticket',
             quantity: 1,
-            unitPrice: booking.baseFare ?? 0,
-            amount: booking.baseFare ?? 0,
+            unitPrice: booking.baseFare ?? booking.amount ?? 0,
+            amount: booking.baseFare ?? booking.amount ?? 0,
           },
         ];
 
@@ -162,7 +162,7 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
   });
 
   // ----- Totals -----
-  let totalsY = Math.max(rowY + 8, 300);
+  let totalsY = Math.min(Math.max(rowY + 8, 300), 620);
   const totalRows: Array<[string, string]> = [
     ['Subtotal', fmt(subtotal, currency)],
     ['Discount', `- ${fmt(discount, currency)}`],

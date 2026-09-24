@@ -477,7 +477,7 @@ function TestModal({ template, customers, onClose, onDone }: { template: Templat
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/30 p-4">
       <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between"><h3 className="text-lg font-extrabold">Send Test Message</h3><button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef]"><X className="h-4 w-4" /></button></div>
-        <p className="mb-3 text-sm text-[#596782]">Template "<b>{template.name}</b>" ko kisi customer ko bhejein (pehla dummy message, direct chat me dikhega).</p>
+        <p className="mb-3 text-sm text-[#596782]">Template "{template.name}" ko kisi customer ko bhejein — message directly customer ke WhatsApp par jayega.</p>
         {error ? <p className="mb-3 rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</p> : null}
         <label className="block"><span className="text-sm font-semibold text-[#405174]">Customer</span><select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-[#d6e1ef] bg-white px-3 outline-none">{customers.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}</select></label>
         <div className="mt-3 rounded-xl bg-[#f8fbff] p-4"><div className="mb-2 text-xs font-bold uppercase tracking-wide text-[#596782]">Will be sent</div><div className="rounded-xl bg-[#d9ffd0] p-5 shadow-sm"><p className="whitespace-pre-wrap break-words">{rendered}</p><div className="mt-2 text-right text-sm text-[#596782]">10:32 AM ✓✓</div></div></div>

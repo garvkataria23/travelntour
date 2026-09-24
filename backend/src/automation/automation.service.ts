@@ -32,6 +32,41 @@ const MESSAGE_TYPE_NAMES: Record<MessageType, string> = {
 
 const SENT_STATUSES = ['SENT', 'DELIVERED', 'READ'];
 
+export type NotificationFlagName =
+  | 'notifyConfirmation'
+  | 'notify48h'
+  | 'notify24h'
+  | 'notifyJourneyDay'
+  | 'notifyCancellation';
+
+export type BusinessSettingLite = Record<NotificationFlagName, boolean>;
+
+const NOTIFICATION_FLAG_BY_MESSAGE_TYPE: Partial<Record<MessageType, NotificationFlagName>> = {
+  BOOKING_CONFIRMATION: 'notifyConfirmation',
+  REMINDER_48H: 'notify48h',
+  REMINDER_24H: 'notify24h',
+  JOURNEY_DAY: 'notifyJourneyDay',
+  BOOKING_CANCELLATION: 'notifyCancellation',
+};
+
+const MESSAGE_TYPE_BY_NOTIFICATION_FLAG: Record<NotificationFlagName, MessageType> = {
+  notifyConfirmation: 'BOOKING_CONFIRMATION',
+  notify48h: 'REMINDER_48H',
+  notify24h: 'REMINDER_24H',
+  notifyJourneyDay: 'JOURNEY_DAY',
+  notifyCancellation: 'BOOKING_CANCELLATION',
+};
+
+/** Respects the business-level notification toggles (Settings → Notifications). */
+export function notificationsEnabled(
+  setting: Partial<BusinessSettingLite> | null | undefined,
+  messageType: MessageType,
+): boolean {
+  const flag = NOTIFICATION_FLAG_BY_MESSAGE_TYPE[messageType];
+  if (!flag) return true; // CUSTOM and unknown types are always allowed
+  return setting ? setting[flag] !== false : true;
+}
+
 @Injectable()
 export class AutomationService {
   private readonly logger = new Logger(AutomationService.name);
@@ -91,6 +126,10 @@ export class AutomationService {
       orderBy: { createdAt: 'asc' },
     });
 
+    const setting = await tx.businessSetting.findUnique({
+      where: { businessId: booking.businessId },
+    });
+
     const existing = await tx.scheduledMessage.findMany({
       where: { bookingId: booking.id },
       select: { automationRuleId: true, status: true },
@@ -106,6 +145,7 @@ export class AutomationService {
     for (const rule of rules) {
       if (rule.triggerType === 'BOOKING_CANCELLED') continue; // handled separately on cancel
       if (deliveredRuleIds.has(rule.id)) continue;
+      if (!notificationsEnabled(setting, rule.messageType)) continue;
 
       const scheduledAt = this.computeScheduledAt(rule, booking, now);
       if (!scheduledAt) continue;
@@ -249,6 +289,10 @@ export class AutomationService {
 
   /** On booking cancel: schedule (and send) the cancellation template. */
   async scheduleCancellationMessage(booking: Booking, customer: Customer) {
+    const setting = await this.prisma.businessSetting.findUnique({
+      where: { businessId: booking.businessId },
+    });
+    if (!notificationsEnabled(setting, 'BOOKING_CANCELLATION')) return null;
     const created = await this.prisma.$transaction(async (tx) => {
       const rule = await tx.automationRule.findFirst({
         where: { businessId: booking.businessId, active: true, triggerType: 'BOOKING_CANCELLED' },
@@ -274,6 +318,46 @@ export class AutomationService {
       return { message: created, jobs };
     }
     return null;
+  }
+
+  /**
+   * Applies settings-triggered notification flag changes. When a flag is
+   * turned OFF, all pending scheduled messages of that type for the business
+   * (including already-queued bullmq jobs) are cancelled immediately.
+   */
+  async applyNotificationFlags(
+    businessId: string,
+    flags: Partial<Record<NotificationFlagName, boolean>>,
+  ) {
+    const jobIds = await this.prisma.$transaction(async (tx) => {
+      const removed: string[] = [];
+      for (const [flagName, enabled] of Object.entries(flags)) {
+        if (enabled !== false) continue;
+        const messageType = MESSAGE_TYPE_BY_NOTIFICATION_FLAG[flagName as NotificationFlagName];
+        if (!messageType) continue;
+        const pending = await tx.scheduledMessage.findMany({
+          where: {
+            businessId,
+            messageType,
+            status: { in: ['SCHEDULED', 'PROCESSING', 'FAILED'] },
+          },
+          select: { id: true, bullmqJobId: true },
+        });
+        if (pending.length === 0) continue;
+        removed.push(
+          ...pending
+            .map((m) => m.bullmqJobId)
+            .filter((id): id is string => Boolean(id)),
+        );
+        await tx.scheduledMessage.updateMany({
+          where: { id: { in: pending.map((m) => m.id) } },
+          data: { status: 'CANCELLED', bullmqJobId: null },
+        });
+      }
+      return removed;
+    });
+    await this.removeJobs(jobIds);
+    return { cancelledJobs: jobIds.length };
   }
 
   // ------------------------------------------------------------------

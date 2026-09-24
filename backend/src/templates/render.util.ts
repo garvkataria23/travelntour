@@ -65,6 +65,10 @@ export function templateBodyValues(
   const dedupe = [...new Set(variables)];
   return dedupe.map((v) => {
     const value = context[v as keyof TemplateContext];
-    return value === undefined || value === null ? (VARIABLE_FALLBACKS[v] ?? '') : String(value);
+    // Meta treats empty-string body params as MISSING (error 131008) — always send a non-empty value.
+    if (value === undefined || value === null || String(value).trim() === '') {
+      return VARIABLE_FALLBACKS[v] ?? 'N/A';
+    }
+    return String(value);
   });
 }

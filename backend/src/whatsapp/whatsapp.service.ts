@@ -45,6 +45,9 @@ const META_ERROR_CODES: Record<number, { code: string; retryable: boolean }> = {
   130429: { code: 'RATE_LIMIT', retryable: true },
   80007: { code: 'NUMBER_NOT_REGISTERED', retryable: false },
   131031: { code: 'TEMPLATE_ERROR', retryable: false },
+  132001: { code: 'TEMPLATE_UNAVAILABLE', retryable: false },
+  131030: { code: 'FREE_FORM_WINDOW', retryable: false },
+  132005: { code: 'TEMPLATE_PAUSED', retryable: false },
   131008: { code: 'SEND_LIMIT_REACHED', retryable: true },
 };
 
