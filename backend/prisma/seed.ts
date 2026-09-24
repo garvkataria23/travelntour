@@ -47,13 +47,15 @@ const TEMPLATES: Array<{
   category: TemplateCategory;
   content: string;
   whatsappTemplateName: string;
+  language: string;
 }> = [
   {
     key: 'confirmation',
     name: 'Booking Confirmation',
     description: 'Sent immediately after booking is created.',
     category: 'BOOKING',
-    whatsappTemplateName: 'booking_confirmation',
+    whatsappTemplateName: 'booking_confirm_enus',
+    language: 'en_US',
     content: `Hi {{customer_name}} 👋
 
 Your flight booking has been confirmed! ✈️
@@ -75,6 +77,7 @@ Team {{business_name}}`,
     description: 'Reminder 2 days before departure.',
     category: 'REMINDER',
     whatsappTemplateName: 'reminder_48h',
+    language: 'en',
     content: `Hi {{customer_name}},
 
 Your flight to {{to}} is in 48 hours! ✈️
@@ -95,6 +98,7 @@ Team {{business_name}}`,
     description: 'Reminder 1 day before departure.',
     category: 'REMINDER',
     whatsappTemplateName: 'reminder_24h',
+    language: 'en',
     content: `Hi {{customer_name}},
 
 Your flight is tomorrow! 🛫
@@ -116,6 +120,7 @@ Team {{business_name}}`,
     description: 'Sent on the day of journey.',
     category: 'REMINDER',
     whatsappTemplateName: 'journey_day',
+    language: 'en',
     content: `Hi {{customer_name}},
 
 Wishing you a safe journey! ✨
@@ -136,6 +141,7 @@ Team {{business_name}}`,
     description: 'Sent when a booking is cancelled.',
     category: 'BOOKING',
     whatsappTemplateName: 'booking_cancellation',
+    language: 'en',
     content: `Hi {{customer_name}},
 
 Your booking (PNR: {{pnr}}) has been cancelled. ✈️
@@ -194,7 +200,7 @@ async function main() {
         content: tpl.content,
         whatsappTemplateName: tpl.whatsappTemplateName,
         status: TemplateStatus.ACTIVE,
-        language: 'en',
+        language: tpl.language,
         variables: ['customer_name', 'pnr', 'flight_number', 'from', 'to', 'date', 'time', 'terminal'],
       },
     });
