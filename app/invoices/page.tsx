@@ -115,7 +115,7 @@ export default function InvoicesPage() {
       if (status) allParams.set("paymentStatus", status);
       allParams.set("page", "1");
       allParams.set("limit", "1000");
-      const all = await api<InvoiceList>(`/invoices?${allParams.toString()}`);
+      const all = await api<InvoiceList>(`/invoices?${allParams.toString()}`, { skipCache: true });
       const ids = (all.items ?? []).map((row) => row.id);
       for (const id of ids) {
         await downloadPdf(id);

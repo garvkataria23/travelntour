@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { AlertTriangle, Banknote, BarChart3, Bell, CalendarCheck, Check, ChevronDown, Clock3, Command, FileText, Home, LogOut, Menu, MessageCircle, Plane, Plus, Receipt, Search, Settings, Users, Wallet, Workflow, X, type LucideIcon } from "lucide-react";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { api, clearSession, formatDate, getAccessToken, getStoredUser, type ApiUser } from "@/lib/api";
-import { useApi } from "@/lib/hooks";
+import { useApi, useOffline } from "@/lib/hooks";
 
 const NAV_ITEMS: Array<{ label: string; href: string; icon: LucideIcon }> = [
   { label: "Dashboard", href: "/dashboard", icon: Home },
@@ -30,6 +30,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<ApiUser | null>(null);
   const router = useRouter();
   const me = useApi<{ business?: { name?: string | null } }>("/settings");
+  const offline = useOffline();
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -54,6 +55,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Sidebar open={open} onClose={() => setOpen(false)} user={user} onLogout={() => setLogoutOpen(true)} expanded={railHover} onHoverChange={setRailHover} />
       <div className={`min-h-screen transition-[padding] duration-200 ${railHover ? "lg:pl-[237px]" : "lg:pl-[76px]"}`}>
         <Topbar onMenu={() => setOpen(true)} user={user} businessName={businessName} onLogout={() => setLogoutOpen(true)} />
+        {offline ? (
+          <div className="flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm font-semibold text-amber-800" role="status">
+            <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+            Offline — showing saved data. Reconnecting…
+          </div>
+        ) : null}
         <main className="px-4 py-4 sm:px-6 lg:px-5 xl:px-8">{children}</main>
       </div>
       <LogoutDialog
@@ -179,7 +186,7 @@ function GlobalSearch() {
         return;
       }
       setLoading(true);
-      api<SearchResults>(`/search?q=${encodeURIComponent(term)}`, { auth: true })
+      api<SearchResults>(`/search?q=${encodeURIComponent(term)}`, { auth: true, skipCache: true })
         .then((result) => setResults(result))
         .catch(() => setResults(null))
         .finally(() => setLoading(false));

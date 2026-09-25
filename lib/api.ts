@@ -21,6 +21,12 @@ const REFRESH_KEY = "fc_refresh";
 const USER_KEY = "fc_user";
 const PERSIST_KEY = "fc_persist";
 
+const CACHE_PREFIX = "fc_cache:v1:";
+const MEM_TTL = 5000;
+
+const memCache = new Map<string, { at: number; data: unknown }>();
+const pending = new Map<string, Promise<unknown>>();
+
 function persist(): boolean {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(PERSIST_KEY) === "1";
@@ -89,6 +95,62 @@ export class ApiError extends Error {
   }
 }
 
+export function emitBackendStatus(online: boolean): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("fc-net", { detail: { online } }));
+}
+
+function cacheKey(method: string, path: string): string {
+  return `${method}:${path}`;
+}
+
+function baseOf(path: string): string {
+  const seg = path.split("?")[0].split("/").filter(Boolean);
+  return "/" + (seg.length >= 2 ? seg.slice(0, 2).join("/") : seg[0] ?? "root");
+}
+
+function writePersistent(path: string, data: unknown): void {
+  if (typeof window === "undefined") return;
+  try {
+    const blob = JSON.stringify({ ts: Date.now(), data });
+    if (blob.length > 400000) return;
+    window.localStorage.setItem(CACHE_PREFIX + "GET:" + path, blob);
+  } catch {
+    /* quota exceeded or storage unavailable */
+  }
+}
+
+export function getCachedGet<T>(path: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(CACHE_PREFIX + "GET:" + path);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { ts: number; data: T };
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function invalidate(keyPrefix: string): void {
+  const mk = "GET:" + keyPrefix;
+  for (const k of Array.from(memCache.keys())) {
+    if (k.startsWith(mk)) memCache.delete(k);
+  }
+  if (typeof window === "undefined") return;
+  const lp = CACHE_PREFIX + mk;
+  const drop: string[] = [];
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith(lp)) drop.push(k);
+    }
+    for (const k of drop) window.localStorage.removeItem(k);
+  } catch {
+    /* ignore */
+  }
+}
+
 let refreshPromise: Promise<boolean> | null = null;
 
 async function tryRefresh(): Promise<boolean> {
@@ -126,10 +188,11 @@ export interface ApiRequestOptions {
   auth?: boolean;
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  skipCache?: boolean;
 }
 
 export async function api<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
-  const { method = "GET", body, auth = true, headers = {}, signal } = options;
+  const { method = "GET", body, auth = true, headers = {}, signal, skipCache = false } = options;
 
   const buildRequest = (token?: string | null): RequestInit => {
     const h: Record<string, string> = { ...headers };
@@ -153,24 +216,57 @@ export async function api<T>(path: string, options: ApiRequestOptions = {}): Pro
       json = { success: false, message: text || res.statusText, code: "HTTP_ERROR" };
     }
     if (!res.ok || json.success === false) {
-      const err = new ApiError(
-        res.status,
-        json.code || "REQUEST_FAILED",
-        json.message || res.statusText,
-        json.errors,
-      );
-      if (res.status === 401 && auth) throw err;
+      const err = new ApiError(res.status, json.code || "REQUEST_FAILED", json.message || res.statusText, json.errors);
       throw err;
     }
     return json.data as T;
   };
+
+  const isCachableGet = method === "GET" && auth && !signal && !skipCache && !path.startsWith("/auth/");
+
+  if (isCachableGet) {
+    const memKey = cacheKey("GET", path);
+    const inflight = pending.get(memKey);
+    if (inflight) return inflight as Promise<T>;
+
+    const mem = memCache.get(memKey);
+    if (mem && Date.now() - mem.at < MEM_TTL) return mem.data as T;
+
+    const p = (async (): Promise<T> => {
+      let res: Response;
+      try {
+        res = await doFetch(getAccessToken());
+      } catch (err) {
+        emitBackendStatus(false);
+        throw err;
+      }
+      if (res.status === 401) {
+        const refreshed = await tryRefresh();
+        res = refreshed ? await doFetch(getAccessToken()) : await doFetch(null);
+      }
+      const data = await parse(res);
+      memCache.set(memKey, { at: Date.now(), data });
+      writePersistent(path, data);
+      emitBackendStatus(true);
+      return data as T;
+    })();
+    pending.set(memKey, p);
+    void p.then(() => pending.delete(memKey), () => pending.delete(memKey));
+    return p;
+  }
 
   if (!auth) {
     const res = await doFetch(null);
     return parse(res);
   }
 
-  let res = await doFetch(getAccessToken());
+  let res: Response;
+  try {
+    res = await doFetch(getAccessToken());
+  } catch (err) {
+    emitBackendStatus(false);
+    throw err;
+  }
   if (res.status === 401) {
     const refreshed = await tryRefresh();
     if (refreshed) {
@@ -179,7 +275,13 @@ export async function api<T>(path: string, options: ApiRequestOptions = {}): Pro
       res = await doFetch(null);
     }
   }
-  return parse(res);
+  const data = await parse(res);
+  if (method !== "GET") {
+    invalidate(baseOf(path));
+    invalidate("/reports/overview");
+  }
+  emitBackendStatus(true);
+  return data;
 }
 
 export function formatCurrency(amount: number | null | undefined, currency = "INR"): string {

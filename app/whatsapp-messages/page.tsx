@@ -167,7 +167,7 @@ export default function WhatsAppMessagesPage() {
       if (to) exportParams.set("to", to);
       exportParams.set("page", "1");
       exportParams.set("limit", "1000");
-      const { items } = await api<MessageList>(`/messages?${exportParams.toString()}`);
+      const { items } = await api<MessageList>(`/messages?${exportParams.toString()}`, { skipCache: true });
       const header = ["Customer", "Phone", "Message Type", "PNR", "Flight", "Scheduled At", "Sent At", "Status"];
       const quote = (value: string) => `"${String(value ?? "").replace(/"/g, '""')}"`;
       const lines = items.map((m) => [m.customer?.name ?? "", m.customer?.phone ?? "", m.messageTypeLabel || m.messageType, m.booking?.pnr ?? "", m.booking?.flightNumber ?? "", formatDate(m.scheduledAt, true), m.sentAt ? formatDate(m.sentAt, true) : "", m.status].map(quote).join(","));
