@@ -262,7 +262,7 @@ export default function CustomersPage() {
             <section className="overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-sm">
               <div className="grid gap-3 p-3 md:grid-cols-[1.4fr_.9fr_.4fr]">
                 <div className="flex h-11 items-center gap-3 rounded-lg border border-[#d6e1ef] px-3"><Search className="h-5 w-5 text-[#405174]" /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} className="min-w-0 flex-1 outline-none" placeholder="Search customers..." /></div>
-                <select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }} className="h-11 rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none">{!status ? <option value="">All Status</option> : null}<option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option></select>
+                <select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }} className="h-11 rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none"><option value="">All Status</option><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option></select>
                 <button onClick={() => { setSearch(""); setQuery(""); setStatus(""); setPage(1); }} className="h-11 rounded-lg border border-[#d6e1ef] font-semibold">Reset</button>
               </div>
               <div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-[#f4f7fb]"><tr><th>Customer</th><th>Contact</th><th>Total Bookings</th><th>Last Journey</th><th>Status</th><th>Actions</th></tr></thead><tbody className="divide-y divide-[#e5edf6]">
@@ -277,7 +277,7 @@ export default function CustomersPage() {
           <aside className="rounded-xl border border-[#dce7f4] bg-white p-4 shadow-sm">
             {!selectedId || (panel.error && !panel.data) ? <div className="py-14 text-center text-[#596782]"><div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-full bg-blue-50"><Users className="h-6 w-6 text-[#1688f9]" /></div>Select a customer to view their details here.</div>
             : panel.loading && !panel.data ? <div className="py-14 text-center text-[#596782]">Loading customer...</div>
-            : panel.data ? <CustomerPanel data={panel.data} /> : null}
+            : panel.data ? <CustomerPanel data={panel.data} onClose={() => setSelectedId(null)} /> : null}
           </aside>
         </div>
       </div>
@@ -289,12 +289,12 @@ export default function CustomersPage() {
   );
 }
 
-function CustomerPanel({ data }: { data: CustomerDetail }) {
+function CustomerPanel({ data, onClose }: { data: CustomerDetail; onClose: () => void }) {
   const [tab, setTab] = useState("overview");
-  const tabs = ["overview", "bookings", "messages", "notes"];
+  const tabs = ["overview", "bookings", "messages"];
   return (
     <div>
-      <div className="flex justify-end"><button onClick={() => setTab("overview")} aria-label="Close panel" className="text-[#526282]"><X /></button></div>
+      <div className="flex justify-end"><button onClick={onClose} aria-label="Close panel" className="text-[#526282]"><X /></button></div>
       <div className="flex items-center gap-4">
         <span className="grid h-16 w-16 place-items-center rounded-full bg-blue-100 text-2xl font-bold text-blue-700">{initialsOf(data.name)}</span>
         <div><h2 className="text-lg font-extrabold">{data.name}</h2><p className="text-[#596782]">Member since {formatDate(data.createdAt)}</p></div>
@@ -305,7 +305,7 @@ function CustomerPanel({ data }: { data: CustomerDetail }) {
         <button onClick={() => setTab("bookings")} className={`ml-auto px-2 py-3 text-sm font-bold text-[#087df0] ${tab === "bookings" ? "border-b-2 border-[#1688f9]" : ""}`}>View All</button>
       </div>
 
-      {tab === "overview" ? <OverviewTab data={data} /> : tab === "bookings" ? <BookingsTab data={data} /> : tab === "messages" ? <MessagesTab data={data} /> : <div className="py-10 text-center text-sm text-[#596782]">No notes saved yet.</div>}
+      {tab === "overview" ? <OverviewTab data={data} /> : tab === "bookings" ? <BookingsTab data={data} /> : <MessagesTab data={data} />}
     </div>
   );
 }

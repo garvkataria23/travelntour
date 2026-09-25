@@ -173,14 +173,9 @@ export default function CustomerDetailPage() {
                   <h2 className="text-lg font-extrabold">Recent Activity</h2>
                   {customer && customer.messages.length === 0 ? <p className="mt-3 text-sm text-[#596782]">No activity yet.</p> : (customer?.messages ?? []).slice(0, 10).map((m) => <p key={m.id} className="mt-4 flex gap-3"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${messageIcon(m.status)}`}>{messageGlyph(m.status)}</span><span className="flex-1"><b>{m.name}</b><span className="block text-[#596782]">{m.renderedContent || "—"}</span></span><span className="text-xs text-[#405174]">{formatDate(m.scheduledAt, true)}</span></p>)}
                 </section>
-                <section className="rounded-xl border border-[#dce7f4] bg-white p-4">
-                  <h2 className="text-lg font-extrabold">Notes</h2>
-                  <p className="mt-3 text-sm text-[#596782]">No notes saved yet.</p>
-                </section>
               </div>
             )}
           </div>
-
           <aside className="space-y-4">
             <Box title="Customer Details" items={[`Full Name|${customer?.name ?? "—"}`, `Phone|+91 ${customer?.phone ?? "—"}`, `Email|${customer?.email ?? "—"}`, `Status|${active ? "Active" : "Inactive"}`, `Member Since|${customer ? formatDate(customer.createdAt) : "—"}`]} />
             <Box title="Quick Actions" items={[]}>

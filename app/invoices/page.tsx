@@ -110,7 +110,13 @@ export default function InvoicesPage() {
     setActionError("");
     setDownloading(true);
     try {
-      const ids = list.data?.items.map((row) => row.id) ?? [];
+      const allParams = new URLSearchParams();
+      if (search.trim()) allParams.set("search", search.trim());
+      if (status) allParams.set("paymentStatus", status);
+      allParams.set("page", "1");
+      allParams.set("limit", "1000");
+      const all = await api<InvoiceList>(`/invoices?${allParams.toString()}`);
+      const ids = (all.items ?? []).map((row) => row.id);
       for (const id of ids) {
         await downloadPdf(id);
       }
@@ -152,7 +158,7 @@ export default function InvoicesPage() {
               <option value="PARTIAL">Partial</option>
               <option value="PAID">Paid</option>
             </select>
-            <button onClick={downloadAll} disabled={downloading || !list.data?.items.length} className="flex h-11 items-center gap-2 rounded-lg border border-[#d6e1ef] bg-white px-4 text-sm font-semibold text-[#405174] disabled:opacity-50"><Download className="h-4 w-4" />Download All</button>
+            <button onClick={downloadAll} disabled={downloading} className="flex h-11 items-center gap-2 rounded-lg border border-[#d6e1ef] bg-white px-4 text-sm font-semibold text-[#405174] disabled:opacity-50"><Download className="h-4 w-4" />Download All</button>
             <button onClick={downloadSelected} disabled={downloading || selected.length === 0} className="flex h-11 items-center gap-2 rounded-lg bg-[#071832] px-4 text-sm font-bold text-white disabled:opacity-50"><Download className="h-4 w-4" />{downloading ? "Downloading..." : selected.length > 0 ? `Download PDFs (${selected.length})` : "Download PDFs"}</button>
           </div>
 
