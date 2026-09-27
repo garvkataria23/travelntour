@@ -1,0 +1,8 @@
+# Shell scripts must keep LF endings. With core.autocrlf=true on Windows, a
+# CRLF checkout makes them fail on the Linux VM with "\r: command not found".
+# The backup scripts are deployed to the Oracle VM, so this is not cosmetic.
+*.sh text eol=lf
+
+# rclone config files are parsed by rclone, which is equally unhappy with CRLF.
+rclone.conf text eol=lf
+backup/rclone.conf.example text eol=lf
