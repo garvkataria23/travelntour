@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { IncomeCategory, Prisma } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { AuthUser } from '../common/current-user.decorator';
+import { BASE_CURRENCY } from '../currency/decimals';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateIncomeDto } from './dto/create-income.dto';
@@ -16,6 +17,11 @@ export class IncomeService {
   private async tz(user: AuthUser) {
     const business = await this.prisma.business.findUnique({ where: { id: user.businessId } });
     return business?.timezone || 'Asia/Kolkata';
+  }
+
+  private async currency(user: AuthUser) {
+    const business = await this.prisma.business.findUnique({ where: { id: user.businessId } });
+    return business?.currency || BASE_CURRENCY;
   }
 
   async list(user: AuthUser, query: Record<string, string>) {
@@ -69,7 +75,7 @@ export class IncomeService {
         title: dto.title,
         note: dto.note,
         amount: dto.amount,
-        currency: dto.currency || 'INR',
+        currency: dto.currency || (await this.currency(user)),
         reference: dto.reference,
         receivedOn: dto.receivedOn ? new Date(dto.receivedOn) : new Date(),
         createdBy: user.id,

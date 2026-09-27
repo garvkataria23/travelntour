@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { ExpenseCategory, Prisma } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { AuthUser } from '../common/current-user.decorator';
+import { BASE_CURRENCY } from '../currency/decimals';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
@@ -20,7 +21,7 @@ export class ExpensesService {
 
   async currency(user: AuthUser) {
     const business = await this.prisma.business.findUnique({ where: { id: user.businessId } });
-    return business?.currency || 'INR';
+    return business?.currency || BASE_CURRENCY;
   }
 
   async list(user: AuthUser, query: Record<string, string>) {
@@ -69,7 +70,7 @@ export class ExpensesService {
         title: dto.title,
         description: dto.description,
         amount: dto.amount,
-        currency: dto.currency || 'INR',
+        currency: dto.currency || (await this.currency(user)),
         incurredOn: dto.incurredOn ? new Date(dto.incurredOn) : new Date(),
         payableTo: dto.payableTo,
         createdBy: user.id,

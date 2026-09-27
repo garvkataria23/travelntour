@@ -8,6 +8,7 @@ import { AutomationModule } from './automation/automation.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { BusinessesModule } from './businesses/businesses.module';
 import { CustomersModule } from './customers/customers.module';
+import { CurrencyModule } from './currency/currency.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { HealthModule } from './health/health.module';
 import { IncomeModule } from './income/income.module';
@@ -51,6 +52,7 @@ import { JwtAuthGuard } from './common/jwt-auth.guard';
     ExpensesModule,
     IncomeModule,
     InvoicesModule,
+    CurrencyModule,
     HealthModule,
   ],
   providers: [

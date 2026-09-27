@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { BookingStatus, MessageStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { AuthUser } from '../common/current-user.decorator';
+import { BASE_CURRENCY } from '../currency/decimals';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -213,7 +214,7 @@ export class ReportsService {
       bucket.count += 1;
       byMonth.set(label, bucket);
     }
-    const currency = (await this.prisma.business.findUnique({ where: { id: user.businessId } }))?.currency || 'INR';
+    const currency = (await this.prisma.business.findUnique({ where: { id: user.businessId } }))?.currency || BASE_CURRENCY;
     return {
       totalRevenue: revenueTotal,
       currency,
@@ -276,7 +277,7 @@ export class ReportsService {
       byMonth.set(label, bucket);
     }
 
-    const currency = (await this.prisma.business.findUnique({ where: { id: user.businessId } }))?.currency || 'INR';
+    const currency = (await this.prisma.business.findUnique({ where: { id: user.businessId } }))?.currency || BASE_CURRENCY;
 
     return {
       total: agg._sum.amount ?? 0,
@@ -348,7 +349,7 @@ export class ReportsService {
       byMonth.set(label, bucket);
     }
 
-    const currency = (await this.prisma.business.findUnique({ where: { id: user.businessId } }))?.currency || 'INR';
+    const currency = (await this.prisma.business.findUnique({ where: { id: user.businessId } }))?.currency || BASE_CURRENCY;
 
     return {
       issued: rows.length,

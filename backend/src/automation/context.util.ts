@@ -1,5 +1,6 @@
 import { Booking, Business, Customer } from '@prisma/client';
 import { DateTime } from 'luxon';
+import { BASE_CURRENCY } from '../currency/decimals';
 import { TemplateContext } from '../templates/templates.service';
 
 /**
@@ -39,7 +40,7 @@ export function bookingTemplateContext(
     journey_time: timeDisplay,
     terminal: booking.terminal ?? '',
     amount: booking.amount !== null && booking.amount !== undefined ? String(booking.amount) : '',
-    currency: booking.currency ?? 'INR',
+    currency: booking.currency ?? BASE_CURRENCY,
   };
 }
 
