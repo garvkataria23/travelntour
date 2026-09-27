@@ -1,5 +1,7 @@
 "use client";
 
+import { BASE_CURRENCY, convertAmount, formatMoney, getDisplayCurrency } from "@/lib/currency-core";
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
 
 export interface ApiUser {
@@ -93,6 +95,15 @@ export class ApiError extends Error {
     this.status = status;
     this.errors = errors;
   }
+}
+
+/**
+ * True when a write was rejected because another member of staff saved the same record
+ * first. The server's message already names them, so forms just surface `err.message`
+ * and offer a reload.
+ */
+export function isEditConflict(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && err.code === 'EDIT_CONFLICT';
 }
 
 export function emitBackendStatus(online: boolean): void {
@@ -284,12 +295,24 @@ export async function api<T>(path: string, options: ApiRequestOptions = {}): Pro
   return data;
 }
 
-export function formatCurrency(amount: number | null | undefined, currency = "INR"): string {
-  const value = Number(amount ?? 0);
-  if (currency === "INR") {
-    return new Intl.NumberFormat("en-IN", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
-  }
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
+/**
+ * The single money formatter for the whole app.
+ *
+ * `currency` is the currency the stored amount is *in* (defaults to the business base,
+ * AED); the result is always rendered in the user's chosen display currency. Passing the
+ * row's own currency - as most call sites do - therefore stays correct even for legacy
+ * rows saved in a different currency.
+ *
+ * When the rate table has not loaded yet the amount is rendered unconverted rather than
+ * withheld, so a number is always on screen.
+ */
+export function formatCurrency(
+  amount: number | null | undefined,
+  currency: string | null | undefined = BASE_CURRENCY,
+): string {
+  const from = (currency || BASE_CURRENCY).toUpperCase();
+  const to = getDisplayCurrency();
+  return formatMoney(convertAmount(Number(amount ?? 0), to, from), to);
 }
 
 export function formatDate(value: string | Date | null | undefined, withTime = false): string {

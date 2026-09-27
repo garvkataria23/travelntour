@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { BackLink } from "@/components/dashboard/back-link";
 import { useApi } from "@/lib/hooks";
 import { api, formatCurrency } from "@/lib/api";
+import { BASE_CURRENCY, useCurrency, useDisplayCurrency } from "@/lib/currency";
 import { FormEvent, useState } from "react";
 import { Banknote, CheckCircle2, Download, MessageCircle, Pencil, Plane, Plus, Printer, Send, Trash2, X } from "lucide-react";
 
@@ -56,6 +57,7 @@ interface InvoiceSettings {
 
 export default function BookingInvoicePage() {
   const { id } = useParams<{ id: string }>();
+  useDisplayCurrency();
   const invoice = useApi<InvoiceData>(id ? `/invoices/${id}` : null);
   const settings = useApi<InvoiceSettings>("/settings");
 
@@ -179,8 +181,8 @@ export default function BookingInvoicePage() {
                         <tr key={item.id}>
                           <td className="px-3 py-2.5 font-medium text-[#071333]">{item.description}</td>
                           <td className="px-3 py-2.5 text-right text-[#405174]">{item.quantity}</td>
-                          <td className="px-3 py-2.5 text-right text-[#405174]">{formatCurrency(item.unitPrice, data.currency ?? "INR")}</td>
-                          <td className="px-3 py-2.5 text-right font-bold text-[#071333]">{formatCurrency(item.amount, data.currency ?? "INR")}</td>
+                          <td className="px-3 py-2.5 text-right text-[#405174]">{formatCurrency(item.unitPrice, data.currency ?? BASE_CURRENCY)}</td>
+                          <td className="px-3 py-2.5 text-right font-bold text-[#071333]">{formatCurrency(item.amount, data.currency ?? BASE_CURRENCY)}</td>
                           <td className="px-3 py-2.5">
                             <div className="flex items-center justify-end gap-2">
                               <button onClick={() => setItemModal({ mode: "edit", item })} className="grid h-8 w-8 place-items-center rounded-lg border border-[#d4dfed] text-[#405174] hover:bg-slate-50" aria-label="Edit item"><Pencil className="h-3.5 w-3.5" /></button>
@@ -205,9 +207,10 @@ export default function BookingInvoicePage() {
 }
 
 function InvoicePaper({ invoice: b, settings }: { invoice: InvoiceData; settings: InvoiceSettings | null }) {
+  const { base } = useCurrency();
   const business = settings?.business;
   const prefs = settings?.preferences;
-  const currency = b.currency ?? "INR";
+  const currency = b.currency ?? base;
 
   const items = b.items.length > 0 ? b.items.map((i) => ({ description: i.description, amount: i.amount })) : [{ description: "Flight ticket", amount: b.baseFare ?? 0 }];
   const route = `${b.fromCity || "—"} to ${b.toCity || "—"}`;
@@ -259,10 +262,10 @@ function InvoicePaper({ invoice: b, settings }: { invoice: InvoiceData; settings
             </tr>
           </thead>
           <tbody className="divide-y divide-[#f0f4f9]">
-            {items.map((item) => <InvoiceLine key={item.description} label={item.description} value={item.amount} />)}
-            {(b.discount ?? 0) > 0 ? <InvoiceLine label="Less: Discount" value={-(b.discount ?? 0)} negative /> : null}
-            <InvoiceLine label="Taxable Value" value={b.taxable} bold />
-            <InvoiceLine label={`GST @ ${formatRate(b.taxRate ?? 0)}%`} value={b.taxAmount ?? 0} />
+            {items.map((item) => <InvoiceLine key={item.description} label={item.description} value={item.amount} currency={currency} />)}
+            {(b.discount ?? 0) > 0 ? <InvoiceLine label="Less: Discount" value={-(b.discount ?? 0)} currency={currency} negative /> : null}
+            <InvoiceLine label="Taxable Value" value={b.taxable} currency={currency} bold />
+            <InvoiceLine label={`GST @ ${formatRate(b.taxRate ?? 0)}%`} value={b.taxAmount ?? 0} currency={currency} />
           </tbody>
           <tfoot>
             <tr>
@@ -270,11 +273,11 @@ function InvoicePaper({ invoice: b, settings }: { invoice: InvoiceData; settings
               <td className="pt-5">
                 <div className="flex items-center justify-between rounded-xl bg-[#0e2a5c] px-5 py-4 text-white">
                   <span className="text-sm font-bold">Total Payable</span>
-                  <span className="text-2xl font-extrabold">{formatMoney(b.total, currency)}</span>
+                  <span className="text-2xl font-extrabold">{formatCurrency(b.total, currency)}</span>
                 </div>
                 <div className="mt-3 flex flex-col items-end gap-1 text-sm">
-                  <span className="font-semibold text-[#00a451]">Paid: {formatMoney(b.paidAmount, currency)}</span>
-                  <span className={`font-extrabold ${b.due > 0 ? "text-rose-600" : "text-[#0e2a5c]"}`}>Amount Due: {formatMoney(b.due, currency)}</span>
+                  <span className="font-semibold text-[#00a451]">Paid: {formatCurrency(b.paidAmount, currency)}</span>
+                  <span className={`font-extrabold ${b.due > 0 ? "text-rose-600" : "text-[#0e2a5c]"}`}>Amount Due: {formatCurrency(b.due, currency)}</span>
                 </div>
               </td>
             </tr>
@@ -297,11 +300,11 @@ function InvoiceBlock({ label, children }: { label: string; children: React.Reac
   return <div><p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-[#8a97ad]">{label}</p>{children}</div>;
 }
 
-function InvoiceLine({ label, value, bold, negative }: { label: string; value: number; bold?: boolean; negative?: boolean }) {
+function InvoiceLine({ label, value, currency, bold, negative }: { label: string; value: number; currency: string; bold?: boolean; negative?: boolean }) {
   return (
     <tr>
       <td className={`py-3 ${bold ? "font-bold text-[#0e2a5c]" : "text-[#405174]"}`}>{label}</td>
-      <td className={`py-3 text-right ${bold ? "font-bold text-[#0e2a5c]" : negative ? "text-rose-600" : "text-[#405174]"}`}>{formatMoney(value)}</td>
+      <td className={`py-3 text-right ${bold ? "font-bold text-[#0e2a5c]" : negative ? "text-rose-600" : "text-[#405174]"}`}>{formatCurrency(value, currency)}</td>
     </tr>
   );
 }
@@ -356,7 +359,7 @@ function ItemModal({ mode, item, bookingId, onClose, onSaved, onError }: { mode:
           <label className="block"><span className="mb-2 block text-sm font-semibold">Description *</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Flight ticket, Convenience fee" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
           <div className="grid grid-cols-2 gap-4">
             <label className="block"><span className="mb-2 block text-sm font-semibold">Quantity</span><input type="number" min="1" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
-            <label className="block"><span className="mb-2 block text-sm font-semibold">Unit Price (₹)</span><input type="number" min="0" step="any" value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} placeholder="e.g. 2500" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+            <label className="block"><span className="mb-2 block text-sm font-semibold">Unit Price (AED)</span><input type="number" min="0" step="any" value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} placeholder="e.g. 2500" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="h-11 rounded-lg border border-[#d6e1ef] px-6 font-semibold text-[#405174]">Cancel</button>
@@ -369,6 +372,8 @@ function ItemModal({ mode, item, bookingId, onClose, onSaved, onError }: { mode:
 }
 
 function PaymentModal({ invoice, bookingId, onClose, onSaved, onError }: { invoice: InvoiceData; bookingId: string; onClose: () => void; onSaved: () => void; onError: (text: string) => void }) {
+  const { base } = useCurrency();
+  const currency = invoice.currency ?? base;
   const [status, setStatus] = useState<"UNPAID" | "PARTIAL" | "PAID">(invoice.paymentStatus);
   const [paidAmount, setPaidAmount] = useState(invoice.paymentStatus === "PARTIAL" ? String(invoice.paidAmount) : "");
   const [error, setError] = useState("");
@@ -401,7 +406,7 @@ function PaymentModal({ invoice, bookingId, onClose, onSaved, onError }: { invoi
     <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/50 p-4" onClick={onClose}>
       <div className="w-full max-w-[420px] rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-[#e5edf6] px-5 py-4">
-          <div><h3 className="text-lg font-extrabold">Update Payment</h3><p className="text-sm text-[#596782]">Total: {formatMoney(invoice.total)} · Due: {formatMoney(invoice.due)}</p></div>
+          <div><h3 className="text-lg font-extrabold">Update Payment</h3><p className="text-sm text-[#596782]">Total: {formatCurrency(invoice.total, currency)} · Due: {formatCurrency(invoice.due, currency)}</p></div>
           <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef]" aria-label="Close"><X className="h-4 w-4" /></button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4 p-5">
@@ -415,7 +420,7 @@ function PaymentModal({ invoice, bookingId, onClose, onSaved, onError }: { invoi
             </div>
           </div>
           {status === "PARTIAL" ? (
-            <label className="block"><span className="mb-2 block text-sm font-semibold">Amount Collected (₹) *</span><input type="number" min="0" step="any" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} placeholder="e.g. 5000" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+            <label className="block"><span className="mb-2 block text-sm font-semibold">Amount Collected (AED) *</span><input type="number" min="0" step="any" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} placeholder="e.g. 5000" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
           ) : null}
           {status === "PAID" ? <p className="rounded-lg bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">Marks the invoice as fully paid.</p> : null}
           <div className="flex justify-end gap-3 pt-2">
@@ -426,10 +431,6 @@ function PaymentModal({ invoice, bookingId, onClose, onSaved, onError }: { invoi
       </div>
     </div>
   );
-}
-
-function formatMoney(value: number, currency = "INR"): string {
-  return new Intl.NumberFormat("en-IN", { style: "currency", currency, maximumFractionDigits: 0 }).format(Math.round(value * 100) / 100);
 }
 
 function formatRate(value: number): string {

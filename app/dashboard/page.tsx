@@ -6,7 +6,7 @@ import { useApi } from "@/lib/hooks";
 import { formatDate, getStoredUser } from "@/lib/api";
 import { Bell, CalendarCheck, CheckCircle2, MessageCircle, Plane, Users, AlertTriangle, ChevronDown } from "lucide-react";
 import type { ApiBookingRow } from "@/components/dashboard/ui";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 interface Overview {
   stats: {
@@ -25,16 +25,11 @@ interface Overview {
 
 export default function DashboardPage() {
   const [days, setDays] = useState(7);
-  const overview = useApi<Overview>(days ? `/reports/overview?days=${days}` : "/reports/overview");
-  const todays = useApi<{ items: ApiBookingRow[] }>("/bookings?period=today&limit=8&sort=departureDate&order=asc");
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      overview.refetch();
-      todays.refetch();
-    }, 30000);
-    return () => window.clearInterval(timer);
-  }, [overview.refetch, todays.refetch]);
+  // Polling lives in useApi now, so every list page gets the same visibility/focus handling
+  // instead of each one hand-rolling a timer.
+  const POLL_MS = 15000;
+  const overview = useApi<Overview>(days ? `/reports/overview?days=${days}` : "/reports/overview", { refetchInterval: POLL_MS });
+  const todays = useApi<{ items: ApiBookingRow[] }>("/bookings?period=today&limit=8&sort=departureDate&order=asc", { refetchInterval: POLL_MS });
 
   const user = getStoredUser();
   const hour = new Date().getHours();

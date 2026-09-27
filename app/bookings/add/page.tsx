@@ -4,7 +4,7 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { ArrowRight, Barcode, Building2, CalendarDays, Clock3, Flag, Lightbulb, Mail, MapPin, Plane, User, Users, MessageCircle, BarChart3, CalendarCheck, Zap, ReceiptText } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { api } from "@/lib/api";
 
 const AIRLINES = ["Air India", "IndiGo", "SpiceJet", "Emirates", "Vistara", "Akasa Air", "Go First"];
@@ -37,6 +37,7 @@ export default function AddBookingPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [created, setCreated] = useState(false);
 
   const set = (key: string) => (value: string) => {
@@ -70,11 +71,15 @@ export default function AddBookingPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // React state is async, so a fast double-click can slip past `submitting` alone.
+    // The ref flips synchronously and blocks the duplicate POST before the server sees it.
+    if (submittingRef.current) return;
     setError("");
     setNotice("");
     const nextErrors = validate();
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const result = await api<{ id: string; invoiceNumber?: string | null }>("/bookings", {
@@ -112,6 +117,7 @@ export default function AddBookingPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to create booking");
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -160,7 +166,7 @@ export default function AddBookingPage() {
                 <Input label="Terminal" hint="(Optional)" icon={Building2} placeholder="e.g. Terminal 2" value={values.terminal} onChange={set("terminal")} />
               </div>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <Input label="Fare Amount" hint="(Optional, in ₹)" icon={BarChart3} placeholder="e.g. 12450" type="number" value={values.amount} onChange={set("amount")} error={errors.amount} />
+                <Input label="Fare Amount" hint="(Optional, in AED)" icon={BarChart3} placeholder="e.g. 12450" type="number" value={values.amount} onChange={set("amount")} error={errors.amount} />
               </div>
             </FormCard>
 
@@ -170,7 +176,7 @@ export default function AddBookingPage() {
                 <Input label="Direct Cost" hint="(Your ticket cost)" icon={BarChart3} placeholder="e.g. 10500" type="number" value={values.cost} onChange={set("cost")} error={errors.cost} />
               </div>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <Input label="Discount" hint="(₹ off base fare)" icon={BarChart3} placeholder="e.g. 500" type="number" value={values.discount} onChange={set("discount")} error={errors.discount} />
+                <Input label="Discount" hint="(AED off base fare)" icon={BarChart3} placeholder="e.g. 500" type="number" value={values.discount} onChange={set("discount")} error={errors.discount} />
                 <Input label="GST Rate" hint="(% default from settings)" icon={BarChart3} placeholder="e.g. 5" type="number" value={values.taxRate} onChange={set("taxRate")} error={errors.taxRate} />
               </div>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-lg bg-[#f1f7ff] p-4">

@@ -3,11 +3,12 @@
 import { AppShell } from "@/components/dashboard/app-shell";
 import { BookingFilters, BookingToolbar, BookingsTable, Pagination, StatCard, initialsOf, type ApiBookingRow } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
-import { api, formatDate } from "@/lib/api";
+import { api, formatCurrency, formatDate, isEditConflict } from "@/lib/api";
+import { useDisplayCurrency } from "@/lib/currency";
 import { Plane, CalendarCheck, Users, Hourglass, AlertTriangle, PlaneTakeoff, PlaneLanding, Printer, Pencil, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { FormEvent } from "react";
 
 interface BookingStats {
@@ -40,6 +41,8 @@ interface BookingDetail {
   currency: string | null;
   invoiceNumber: string | null;
   source: string | null;
+  version: number;
+  lastEditor: { name: string } | null;
   createdAt: string;
   updatedAt: string;
   customer: { id: string; name: string; phone: string; email: string | null } | null;
@@ -58,6 +61,7 @@ export default function BookingsPage() {
 
 function BookingsPageInner() {
   const searchParams = useSearchParams();
+  useDisplayCurrency();
   const initial = useMemo(() => {
     const today = localISODate(new Date());
     const search = searchParams.get("search") ?? "";
@@ -102,16 +106,38 @@ function BookingsPageInner() {
   params.set("page", String(page));
   params.set("limit", String(limit));
 
-  const stats = useApi<BookingStats>("/bookings/stats");
+  // 15s polling so a colleague's new booking shows up without a manual refresh.
+  const POLL_MS = 15000;
+  const stats = useApi<BookingStats>("/bookings/stats", { refetchInterval: POLL_MS });
   const airlines = useApi<Array<{ name: string; count: number }>>("/bookings/airlines");
-  const list = useApi<BookingList>(`/bookings?${params.toString()}`);
-  const detail = useApi<BookingDetail>(viewId ? `/bookings/${viewId}` : null);
+  const list = useApi<BookingList>(`/bookings?${params.toString()}`, { refetchInterval: POLL_MS });
+  const detail = useApi<BookingDetail>(viewId ? `/bookings/${viewId}` : null, { refetchInterval: POLL_MS });
 
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(""), 3000);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  // The list polls every 15s, so a colleague's edit can land in the middle of someone's
+  // screen with no feedback. Flag it instead of silently swapping rows under them.
+  const listFingerprint = useMemo(
+    () => (list.data?.items ?? []).map((b) => `${b.id}:${b.status}:${b.amount ?? ""}`).join("|"),
+    [list.data],
+  );
+  const lastFingerprint = useRef<string | null>(null);
+  const [liveUpdate, setLiveUpdate] = useState(false);
+  useEffect(() => {
+    if (lastFingerprint.current === null) {
+      lastFingerprint.current = listFingerprint;
+      return;
+    }
+    if (listFingerprint === lastFingerprint.current) return;
+    lastFingerprint.current = listFingerprint;
+    setLiveUpdate(true);
+    const timer = setTimeout(() => setLiveUpdate(false), 4000);
+    return () => clearTimeout(timer);
+  }, [listFingerprint]);
 
   function resetFilters() {
     setSearch("");
@@ -199,6 +225,7 @@ function BookingsPageInner() {
           {statCards.map((stat) => <StatCard key={stat.title} {...stat} />)}
         </div>
         {actionError ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{actionError}</p> : null}
+        {liveUpdate ? <p className="rounded-lg bg-blue-50 px-4 py-2.5 text-sm font-medium text-[#087df0]">This list was just updated with a colleague&apos;s changes.</p> : null}
         {list.error ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{list.error}</p> : null}
         <BookingFilters
           search={search}
@@ -275,13 +302,17 @@ function detailRow(label: string, value: string) {
   return <div className="rounded-lg bg-[#f4f8fd] px-4 py-3"><div className="text-xs font-bold uppercase text-[#8a97ad]">{label}</div><div className="mt-0.5 font-semibold capitalize">{value}</div></div>;
 }
 
-function formatCurrency(amount: number | null | undefined, currency: string | null | undefined) {
-  if (amount === null || amount === undefined) return "—";
-  return new Intl.NumberFormat("en-IN", { style: "currency", currency: currency || "INR", maximumFractionDigits: 0 }).format(amount);
-}
-
 function EditBookingModal({ id, onClose, onSaved }: { id: string; onClose: () => void; onSaved: () => void }) {
   const detail = useApi<BookingDetail>(`/bookings/${id}`);
+  const [formKey, setFormKey] = useState(0);
+
+  // Pull the colleague's version first, then remount the form on the fresh data so it
+  // re-seeds its diff baseline. Remounting on the stale props would just 409 again.
+  async function handleReload() {
+    await detail.refetch();
+    setFormKey((n) => n + 1);
+  }
+
   return (
     <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/50 p-4" onClick={onClose}>
       <div className="max-h-[85vh] w-full max-w-[560px] overflow-y-auto rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
@@ -290,14 +321,14 @@ function EditBookingModal({ id, onClose, onSaved }: { id: string; onClose: () =>
           <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef]" aria-label="Close"><X className="h-4 w-4" /></button>
         </div>
         {detail.loading ? <div className="px-5 py-10 text-center text-sm text-[#596782]">Loading booking…</div> : !detail.data ? <div className="px-5 py-10 text-center text-sm text-rose-600">{detail.error ?? "Booking not found."}</div> : (
-          <BookingEditForm booking={detail.data} onClose={onClose} onSaved={onSaved} />
+          <BookingEditForm key={formKey} booking={detail.data} onClose={onClose} onSaved={onSaved} onReload={handleReload} />
         )}
       </div>
     </div>
   );
 }
 
-function BookingEditForm({ booking, onClose, onSaved }: { booking: BookingDetail; onClose: () => void; onSaved: () => void }) {
+function BookingEditForm({ booking, onClose, onSaved, onReload }: { booking: BookingDetail; onClose: () => void; onSaved: () => void; onReload: () => void }) {
   const [status, setStatus] = useState(booking.status);
   const [amount, setAmount] = useState(booking.amount ? String(booking.amount) : "");
   const [pnr, setPnr] = useState(booking.pnr);
@@ -309,32 +340,61 @@ function BookingEditForm({ booking, onClose, onSaved }: { booking: BookingDetail
   const [departureDate, setDepartureDate] = useState(booking.departureDate ? localISODate(new Date(booking.departureDate)) : "");
   const [departureTime, setDepartureTime] = useState(booking.departureTime ?? "");
   const [error, setError] = useState("");
+  const [conflict, setConflict] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Freeze the values this form was opened with. Polling keeps `booking` up to date, and
+  // the diff below has to stay anchored to what the user actually saw and is editing.
+  const baseline = useRef({
+    status: booking.status,
+    amount: booking.amount ? String(booking.amount) : "",
+    pnr: booking.pnr,
+    referenceNumber: booking.referenceNumber ?? "",
+    flightNumber: booking.flightNumber ?? "",
+    airline: booking.airline ?? "",
+    fromPort: booking.fromAirport ?? booking.fromCity ?? "",
+    toPort: booking.toAirport ?? booking.toCity ?? "",
+    departureDate: booking.departureDate ? localISODate(new Date(booking.departureDate)) : "",
+    departureTime: booking.departureTime ?? "",
+    version: booking.version ?? 0,
+  });
+
+  // Someone else saved while this form was open. We still let the user save - the server
+  // rejects it with 409 - but warn first so the 409 is a confirmation, not a surprise.
+  const stale = (booking.version ?? 0) !== baseline.current.version;
+  const staleBy = booking.lastEditor?.name;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setError("");
+    setConflict(false);
     if (!departureDate) { setError("Departure date is required."); return; }
+
+    const base = baseline.current;
+    const patch: Record<string, unknown> = { version: base.version };
+    if (status !== base.status) patch.status = status;
+    if (amount !== base.amount) patch.amount = amount ? Number(amount) : undefined;
+    if (pnr.trim() !== base.pnr) patch.pnr = pnr.trim();
+    if (referenceNumber.trim() !== base.referenceNumber) patch.referenceNumber = referenceNumber.trim() || undefined;
+    if (flightNumber.trim() !== base.flightNumber) patch.flightNumber = flightNumber.trim();
+    if (airline.trim() !== base.airline) patch.airline = airline.trim();
+    if (fromPort.trim() !== base.fromPort) patch.from = fromPort.trim();
+    if (toPort.trim() !== base.toPort) patch.to = toPort.trim();
+    if (departureDate !== base.departureDate) patch.departureDate = departureDate;
+    if (departureTime.trim() !== base.departureTime) patch.departureTime = departureTime.trim() || undefined;
+
     setSubmitting(true);
     try {
-      await api(`/bookings/${booking.id}`, {
-        method: "PATCH",
-        body: {
-          status,
-          ...(amount ? { amount: Number(amount) } : {}),
-          pnr: pnr.trim(),
-          referenceNumber: referenceNumber.trim() || undefined,
-          flightNumber: flightNumber.trim(),
-          airline: airline.trim(),
-          from: fromPort.trim(),
-          to: toPort.trim(),
-          departureDate,
-          departureTime: departureTime.trim() || undefined,
-        },
-      });
+      await api(`/bookings/${booking.id}`, { method: "PATCH", body: patch });
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to update booking.");
+      if (isEditConflict(err)) {
+        setConflict(true);
+        setError(err instanceof Error ? err.message : "This booking was changed by someone else.");
+      } else {
+        setError(err instanceof Error ? err.message : "Unable to update booking.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -342,7 +402,21 @@ function BookingEditForm({ booking, onClose, onSaved }: { booking: BookingDetail
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 px-5 py-5">
-      {error ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</p> : null}
+      {stale && !conflict ? (
+        <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+          {staleBy ? `${staleBy} saved changes to this booking after you opened it.` : "This booking was changed after you opened it."} Saving will show you what to review.
+        </p>
+      ) : null}
+      {error ? (
+        <div className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          <p>{error}</p>
+          {conflict ? (
+            <button type="button" onClick={onReload} className="mt-2 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white">
+              Reload and start again
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <div>
         <span className="mb-2 block text-sm font-semibold">Status</span>
         <div className="grid grid-cols-3 gap-2">
@@ -367,7 +441,7 @@ function BookingEditForm({ booking, onClose, onSaved }: { booking: BookingDetail
         <label className="block"><span className="mb-2 block text-sm font-semibold">Departure Date *</span><input type="date" value={departureDate} onChange={(event) => setDepartureDate(event.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
         <label className="block"><span className="mb-2 block text-sm font-semibold">Departure Time</span><input value={departureTime} onChange={(event) => setDepartureTime(event.target.value)} placeholder="e.g. 10:30 AM" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
       </div>
-      <label className="block"><span className="mb-2 block text-sm font-semibold">Amount (₹)</span><input type="number" min="0" value={amount} onChange={(event) => setAmount(event.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+      <label className="block"><span className="mb-2 block text-sm font-semibold">Amount (AED)</span><input type="number" min="0" value={amount} onChange={(event) => setAmount(event.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
       <p className="text-xs text-[#65728a]">Changing the journey date/time automatically reschedules WhatsApp reminders for the customer.</p>
       <div className="flex justify-end gap-3 pt-2">
         <button type="button" onClick={onClose} className="h-11 rounded-lg border border-[#d6e1ef] px-6 font-semibold text-[#405174]">Cancel</button>
@@ -386,13 +460,15 @@ function RescheduleModal({ id, onClose, onSaved }: { id: string; onClose: () => 
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setError("");
     if (!date) { setError("Select a new departure date."); return; }
     setSubmitting(true);
     try {
+      // version guards against a colleague rescheduling the same booking at the same time.
       await api(`/bookings/${id}/reschedule`, {
         method: "POST",
-        body: { departureDate: date, ...(time.trim() ? { departureTime: time.trim() } : {}) },
+        body: { version: detail.data?.version ?? 0, departureDate: date, ...(time.trim() ? { departureTime: time.trim() } : {}) },
       });
       onSaved();
     } catch (err) {
