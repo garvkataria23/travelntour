@@ -1,6 +1,13 @@
 import { PrismaClient, Role, TriggerType, MessageType, TemplateCategory, TemplateStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
+const adminPassword = process.env.ADMIN_INITIAL_PASSWORD?.trim() ?? '';
+if (adminPassword.length < 12) {
+  throw new Error(
+    'ADMIN_INITIAL_PASSWORD is missing or shorter than 12 characters. Set it in backend/.env before seeding.',
+  );
+}
+
 const AIRPORT: Record<string, { code: string; city: string }> = {
   BOM: { code: 'BOM', city: 'Mumbai' },
   DEL: { code: 'DEL', city: 'Delhi' },
@@ -170,12 +177,12 @@ async function main() {
       email: 'hello@blueauratourism.com',
       phone: '+91 88282 88282',
       timezone: TZ,
-      currency: 'INR',
+      currency: 'AED',
     },
   });
 
   await prisma.businessSetting.create({
-    data: { businessId: business.id, timezone: TZ },
+    data: { businessId: business.id, timezone: TZ, currency: 'AED', defaultCurrency: 'AED' },
   });
 
   const admin = await prisma.user.create({
@@ -184,7 +191,7 @@ async function main() {
       name: 'Garv Kataria',
       email: 'admin@flyconnect.dev',
       phone: '+91 98765 43210',
-      passwordHash: await bcrypt.hash('Admin@123', 12),
+      passwordHash: await bcrypt.hash(adminPassword, 12),
       role: Role.ADMIN,
     },
   });
@@ -231,7 +238,7 @@ async function main() {
 
   console.log('Seed completed:');
   console.log(`  - Business: ${BUSINESS_NAME}`);
-  console.log(`  - Admin:    admin@flyconnect.dev / Admin@123`);
+  console.log(`  - Admin:    ${admin.email} (password from ADMIN_INITIAL_PASSWORD)`);
   console.log(`  - Templates: ${TEMPLATES.length}`);
   console.log(`  - Automation rules: ${rules.length}`);
 }

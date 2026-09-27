@@ -24,10 +24,6 @@ export class RegisterDto {
 
   @IsOptional()
   @IsString()
-  role?: string;
-
-  @IsOptional()
-  @IsString()
   userAgent?: string;
 
   @IsOptional()

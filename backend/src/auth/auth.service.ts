@@ -55,7 +55,7 @@ export class AuthService {
         email: dto.email,
         phone: dto.phone,
         passwordHash: await this.hashPassword(dto.password),
-        role: (dto.role as Role) ?? Role.ADMIN,
+        role: Role.ADMIN,
       },
     });
 
@@ -125,27 +125,13 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, userAgent?: string, ip?: string) {
-    const demoId = this.config.get<string>('DEMO_ID') ?? 'blue';
-    const demoPassword = this.config.get<string>('DEMO_PASSWORD') ?? 'aura';
-    const demoEmail = this.config.get<string>('DEMO_EMAIL') ?? 'admin@flyconnect.dev';
-
-    const identifier = dto.email;
-    const isDemo = identifier === demoId && dto.password === demoPassword;
-
-    let user: User | null = null;
-    if (isDemo) {
-      user = await this.prisma.user.findUnique({ where: { email: demoEmail } });
-    } else {
-      user = await this.prisma.user.findUnique({ where: { email: identifier } });
-    }
+    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (!user) {
       throw new UnauthorizedException({ message: 'Invalid email or password', code: 'INVALID_CREDENTIALS' });
     }
-    if (!isDemo) {
-      const ok = await bcrypt.compare(dto.password, user.passwordHash);
-      if (!ok) {
-        throw new UnauthorizedException({ message: 'Invalid email or password', code: 'INVALID_CREDENTIALS' });
-      }
+    const ok = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!ok) {
+      throw new UnauthorizedException({ message: 'Invalid email or password', code: 'INVALID_CREDENTIALS' });
     }
     if (user.status !== 'ACTIVE') {
       throw new ForbiddenException({ message: 'Your account is inactive', code: 'ACCOUNT_INACTIVE' });
