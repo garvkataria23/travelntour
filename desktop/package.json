@@ -1,0 +1,89 @@
+{
+  "name": "flyconnect-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FlyConnect - BlueAura Tourism Desktop App",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^24.13.3",
+    "png-to-ico": "^3.0.2"
+  },
+  "build": {
+    "appId": "com.flyconnect.desktop",
+    "productName": "FlyConnect",
+    "asar": false,
+    "compression": "normal",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../.next",
+        "to": "frontend/.next"
+      },
+      {
+        "from": "../node_modules",
+        "to": "frontend/node_modules"
+      },
+      {
+        "from": "../package.json",
+        "to": "frontend/package.json"
+      },
+      {
+        "from": "../next.config.js",
+        "to": "frontend/next.config.js"
+      },
+      {
+        "from": "../public",
+        "to": "frontend/public"
+      },
+      {
+        "from": "../.env.local",
+        "to": "frontend/.env.local"
+      },
+      {
+        "from": "../backend/dist",
+        "to": "backend/dist"
+      },
+      {
+        "from": "../backend/node_modules",
+        "to": "backend/node_modules"
+      },
+      {
+        "from": "../backend/.env",
+        "to": "backend/.env"
+      },
+      {
+        "from": "../backend/package.json",
+        "to": "backend/package.json"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "FlyConnect"
+    }
+  }
+}
