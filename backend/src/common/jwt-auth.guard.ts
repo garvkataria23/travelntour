@@ -8,13 +8,15 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { AuthUser } from '../common/current-user.decorator';
 import { ROLES_KEY } from '../common/roles.decorator';
-import { Role } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { Role, UserStatus } from '@prisma/client';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwtService: JwtService,
     private readonly reflector: Reflector,
+    private readonly prisma: PrismaService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -34,15 +36,31 @@ export class JwtAuthGuard implements CanActivate {
       if (payload.type !== 'access') {
         throw new UnauthorizedException({ message: 'Invalid token type', code: 'INVALID_TOKEN' });
       }
+
+      // A signed token proves who signed in, not that the account is still usable. Without
+      // this lookup a suspended user, or one whose role was downgraded, keeps full access for
+      // the remaining lifetime of their 15 minute access token.
+      const account = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: { id: true, businessId: true, email: true, name: true, role: true, status: true },
+      });
+      if (!account) {
+        throw new UnauthorizedException({ message: 'Account no longer exists', code: 'ACCOUNT_NOT_FOUND' });
+      }
+      if (account.status !== UserStatus.ACTIVE) {
+        throw new UnauthorizedException({ message: 'Your account is inactive', code: 'ACCOUNT_INACTIVE' });
+      }
+
       const user: AuthUser = {
-        id: payload.sub,
-        businessId: payload.businessId,
-        email: payload.email,
-        name: payload.name,
-        role: payload.role,
+        id: account.id,
+        businessId: account.businessId,
+        email: account.email,
+        name: account.name,
+        role: account.role,
       };
       request.user = user;
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedException) throw err;
       throw new UnauthorizedException({ message: 'Invalid or expired token', code: 'INVALID_TOKEN' });
     }
 
