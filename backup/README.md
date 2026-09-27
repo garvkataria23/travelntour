@@ -78,18 +78,36 @@ unattended with no browser and no user present.
 
 ```bash
 sudo rclone config          # follow backup/rclone.conf.example
-sudo rclone config password # encrypts the config file itself
 ```
 
 Four remotes must exist — see `rclone.conf.example` for the exact fields.
 
-Then verify both directions before trusting anything:
+> **Order matters, and it is not reversible.** Do these three steps in sequence:
+>
+> 1. Put the **crypt passwords** in your password manager.
+> 2. *Then* run `sudo rclone config password` to encrypt the config file.
+> 3. Put **that** config password in the same note, then `shred -u` the
+>    plaintext config.
+>
+> Skipping step 1 leaves you with exactly one copy of the crypt keys — inside a
+> file you are about to make unreadable. Note also that `sudo cat` of a key file
+> lands in your terminal scrollback, and on any shared session logger; shred the
+> plaintext as soon as the password manager has it.
+
+Then verify **functionally**. A text check cannot work here: the values in
+`rclone.conf` are `rclone obscure`d, so a placeholder and a real credential look
+identical, and grepping for the placeholder string finds nothing because it was
+obscured on the way in. `rclone config show` is equally useless for this.
 
 ```bash
-rclone lsd gdrive-crypt:flyconnect-backups
-rclone lsd mega-crypt:flyconnect-backups
-rclone about gdrive: --json
+sudo rclone lsd gdrive-crypt:flyconnect-backups   # must authenticate
+sudo rclone lsd mega-crypt:flyconnect-backups     # must authenticate
 ```
+
+A placeholder credential fails here with an auth/login error, and that is the
+only signal that counts. **Both remotes must pass before you continue** — a Drive
+primary with an unverified MEGA fallback means you find out at the worst possible
+moment that your fallback does not exist.
 
 > **The crypt passwords cannot be rotated.** rclone derives its key from them
 > directly; changing them makes every existing backup permanently unreadable
@@ -140,6 +158,13 @@ throwaway database, compares exact row counts for every table, and confirms
 ```bash
 sudo crontab -e
 ```
+
+> **Cron must be root's crontab.** `rclone.conf` is mode 600 under `/etc` and is
+> reached through a symlink in `/root/.config/rclone/`, so only root can read it.
+> A job added to `/etc/cron.d/` or to another user's crontab will fail to
+> authenticate on every run — and, worse, the retention prune (`rclone delete`)
+> will also never run, so the remote silently grows forever while the log shows
+> nothing unusual. Use `sudo crontab -e`, and nothing else.
 
 Retention: **30 days** on Drive, **90 days** on MEGA (the fallback is the
 long-term archive). Change via `PRIMARY_RETENTION` / `FALLBACK_RETENTION`.
@@ -206,10 +231,16 @@ both in the Meta dashboard, then rewrite history. The app reads tokens from the
 environment at runtime (`backend/src/whatsapp/whatsapp.service.ts`), so rotating
 does not require a redeploy beyond updating `backend/.env`.
 
-**Weak committed database credentials.** `docker-compose.yml` hardcodes
-`POSTGRES_PASSWORD: flyconnect` and the file is tracked. Acceptable only if the
-5432 port is not exposed publicly — verify that on the VM's firewall and cloud
-security list.
+**Committed database credentials, but not reachable.** `docker-compose.yml`
+hardcodes `POSTGRES_PASSWORD: flyconnect` and publishes `5432:5432` and
+`6379:6379` on `0.0.0.0`; Redis additionally has no password at all. **Verified
+on the VM:** UFW is active with `default deny incoming` and only 22/80/443
+allowed, and an external probe confirms 4000/5432/6379 are all unreachable. So
+this is currently safe — but it is safe only because of the firewall, not the
+compose file. Note that Docker inserts its own iptables rules ahead of UFW, so
+"it is bound to 0.0.0.0" is not the same as "it is exposed". If the firewall is
+ever rebuilt or disabled, re-probe from outside rather than reading the compose
+file.
 
 **No lint config in the backend.** `package.json` defines a `lint` script but
 `eslint` is not in `devDependencies` and no config file exists, so `npm run lint`
