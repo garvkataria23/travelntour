@@ -1,0 +1,88 @@
+# FlyConnect backup — rclone remote template.
+#
+# Copy to rclone.conf and fill in, or better: run `rclone config` interactively
+# and use this file only as a reference for what the final config must contain.
+#
+# NEVER COMMIT THE REAL rclone.conf. It contains the keys that decrypt every
+# backup. It is gitignored; this .example is what belongs in the repository.
+#
+# Encrypt the config itself so the obscured passwords are not sitting in plain
+# text on the VM:
+#
+#     rclone config password
+#
+# Layout: two storage backends, each wrapped in its own crypt layer.
+# The crypt layer means the provider stores ciphertext — Google and MEGA never
+# see database contents, table names, or file names.
+#
+# IMPORTANT: each crypt remote points at its own dedicated path, not the remote
+# root. That keeps backup files isolated from anything else on the account.
+
+# ---------------------------------------------------------------------------
+# Storage backend 1 — Google Drive (PRIMARY)
+#
+# Create a service account in the Google Cloud project, enable the Drive API,
+# download a JSON key, and share a folder with the service account's
+# client_email with "Editor" access. A service account is used instead of an
+# OAuth user flow because this runs unattended on a server with no browser.
+# ---------------------------------------------------------------------------
+[gdrive]
+type = drive
+scope = drive
+service_account_file = /etc/flyconnect/sa.json
+team_drive =
+
+# ---------------------------------------------------------------------------
+# Storage backend 2 — MEGA (FALLBACK)
+#
+# Different vendor, different infrastructure, different failure domain. That
+# independence is the entire point: a fallback on the same cloud as the primary
+# protects against nothing.
+#
+# Sign in through the MEGA browser client once before configuring this, so the
+# account's encryption keys exist. rclone cannot bootstrap them itself and the
+# login will fail without this step.
+#
+# Enable 2FA and set a recovery email on this account. If the account is lost,
+# the fallback copies are lost with it.
+# ---------------------------------------------------------------------------
+[mega]
+type = mega
+user = me@example.com
+pass = <run: rclone obscure 'your-password'>
+hard_delete = false
+
+# ---------------------------------------------------------------------------
+# Crypt wrapper for Google Drive.
+#
+# password / password2 come from `rclone obscure '...'`. Use long, random,
+# unrelated values — do not reuse the MEGA password.
+#
+# CRITICAL: rclone crypt derives its key directly from these passwords and
+# cannot re-key existing data. Changing them does not migrate old backups, it
+# makes every existing backup permanently unreadable. The only recovery is
+# re-uploading everything from a source that still exists. Store these in a
+# password manager, not just on the VM.
+# ---------------------------------------------------------------------------
+[gdrive-crypt]
+type = crypt
+remote = gdrive:flyconnect-backups
+password = <run: rclone obscure 'a-long-random-string'>
+password2 = <run: rclone obscure 'a-different-long-random-string'>
+filename_encryption = standard
+directory_name_encryption = true
+# Optional: base64 shortens the encrypted names, which matters for path length
+# limits on deeply nested folders. Not required here.
+# filename_encoding = base64
+
+# ---------------------------------------------------------------------------
+# Crypt wrapper for MEGA. Must use the SAME password/password2 as
+# gdrive-crypt so either copy can be restored by one config.
+# ---------------------------------------------------------------------------
+[mega-crypt]
+type = crypt
+remote = mega:flyconnect-backups
+password = <run: rclone obscure 'a-long-random-string'>
+password2 = <run: rclone obscure 'a-different-long-random-string'>
+filename_encryption = standard
+directory_name_encryption = true
