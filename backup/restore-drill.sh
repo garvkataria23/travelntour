@@ -74,9 +74,15 @@ fail() {
   exit 1
 }
 
-psql_prod() { docker exec -i "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -At -c "$1"; }
-psql_drill() { docker exec -i "$PG_CONTAINER" psql -U "$PG_USER" -d "$DRILL_DB" -At -c "$1"; }
-psql_admin() { docker exec -i "$PG_CONTAINER" psql -U "$PG_USER" -d postgres -At -c "$1"; }
+# NOTE: no -i on these three. Every query is passed with -c, so stdin is never
+# read, and docker exec -i would otherwise consume the caller's stdin. That is
+# not hypothetical: inside emit_counts' `while read` loop the here-string is the
+# loop's stdin, so `docker exec -i` swallowed the remaining table names and the
+# drill silently compared 1 table instead of all 16. Only the pg_restore call
+# below needs -i, because that one genuinely streams the archive on stdin.
+psql_prod() { docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -At -c "$1"; }
+psql_drill() { docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$DRILL_DB" -At -c "$1"; }
+psql_admin() { docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres -At -c "$1"; }
 
 # Emit "table<TAB>count" for every base table in the public schema.
 # Enumerated dynamically, so tables added later (visa applications, etc.) are
@@ -157,9 +163,12 @@ main() {
   psql_admin "CREATE DATABASE \"$DRILL_DB\";" >/dev/null \
     || fail "could not create the scratch database"
 
-  # --no-owner --if-exists keeps the restore tolerant of role differences.
+  # The scratch database was just dropped and recreated, so it is always empty.
+  # --no-owner is what makes the restore tolerant of role differences.
+  # Do NOT add --if-exists here: pg_restore rejects it unless --clean is also
+  # given, and without --clean it is meaningless anyway on an empty database.
   if ! docker exec -i "$PG_CONTAINER" \
-        pg_restore -U "$PG_USER" -d "$DRILL_DB" --no-owner --no-acl --if-exists \
+        pg_restore -U "$PG_USER" -d "$DRILL_DB" --no-owner --no-acl \
         <"${WORK}/${dump}" >/dev/null 2>"${WORK}/restore.err"; then
     log "WARN" "pg_restore reported errors:"
     head -n 20 "${WORK}/restore.err" >&2
