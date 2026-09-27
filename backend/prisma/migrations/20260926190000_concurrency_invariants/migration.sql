@@ -8,8 +8,22 @@
 --    handed the same number and both invoices were printable. Postgres treats NULLs as
 --    distinct in a unique index, so bookings without an invoice are unaffected.
 --
--- NOTE: step 3 fails if duplicate invoice numbers already exist. This deployment has never
--- been used, so run `npm run prisma:wipe` before applying to be certain.
+-- PRE-FLIGHT: step 3 fails if duplicate invoice numbers already exist. Check first:
+--
+--   SELECT "businessId", "invoiceNumber", count(*)
+--   FROM "Booking" WHERE "invoiceNumber" IS NOT NULL
+--   GROUP BY 1,2 HAVING count(*) > 1;
+--
+-- Zero rows means this migration applies cleanly. Non-zero rows means you must
+-- resolve the duplicates deliberately — reassign or void the later invoices by
+-- hand. DO NOT reach for `npm run prisma:wipe` to clear the error: that script
+-- deletes every booking, customer, invoice, expense, income, message log and
+-- audit log in the database. It exists to bootstrap an empty database, not to
+-- satisfy a migration precondition. Once this database holds a single real
+-- booking it must never be run against it again.
+--
+-- Prisma wraps each migration file in a transaction, so if the unique index does
+-- fail, this whole file rolls back and the schema is left untouched.
 
 -- AlterTable
 ALTER TABLE "Booking" ADD COLUMN "updatedBy" TEXT,
