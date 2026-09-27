@@ -16,6 +16,27 @@ const ERROR_CODES: Record<string, string> = {
   P2014: 'RELATED_RESOURCE_REQUIRED',
 };
 
+/**
+ * Turns Prisma's generic "A record with these details already exists" into something a
+ * travel agent can act on. `meta.target` carries the constraint, e.g. "businessId_phone" or
+ * "businessId_pnr_key".
+ */
+const DUPLICATE_FIELD_MESSAGES: Array<[RegExp, string]> = [
+  [/businessId_phone/, 'Another customer already has this phone number'],
+  [/businessId_pnr/, 'A booking with this PNR already exists'],
+  [/businessId_invoiceNumber/, 'That invoice number has already been used'],
+  [/User_email_key|^email$/, 'That email address is already registered'],
+];
+
+function duplicateFieldMessage(exception: Prisma.PrismaClientKnownRequestError): string {
+  const target = (exception.meta as { target?: unknown } | undefined)?.target;
+  const fields = Array.isArray(target) ? target.join(',') : String(target ?? '');
+  for (const [pattern, message] of DUPLICATE_FIELD_MESSAGES) {
+    if (pattern.test(fields)) return message;
+  }
+  return 'A record with these details already exists';
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
@@ -61,7 +82,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
               : HttpStatus.INTERNAL_SERVER_ERROR;
       message =
         exception.code === 'P2002'
-          ? 'A record with these details already exists'
+          ? duplicateFieldMessage(exception)
           : exception.code === 'P2025'
             ? 'Resource not found'
             : 'Database request failed';

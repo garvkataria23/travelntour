@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { Booking, Customer, InvoiceItem } from '@prisma/client';
+import { BASE_CURRENCY, minorUnitDigits } from '../currency/decimals';
 
 export interface InvoicePdfInput {
   booking: Booking;
@@ -14,14 +15,41 @@ export interface InvoicePdfInput {
   paidAmount: number;
 }
 
-function fmt(value: number, currency = 'INR'): string {
-  const v = Math.round((Number(value) || 0) * 100) / 100;
-  return new Intl.NumberFormat('en-IN', {
+/**
+ * jsPDF's built-in fonts are WinAnsi-encoded, so currency symbols outside Latin-1
+ * (₹, د.إ, ₺, ₴ …) render as blanks. Formatting with `currencyDisplay: 'code'` keeps the
+ * output ASCII-safe and unambiguous - "AED 1,000" / "USD 1,000.00" - and `toLatin1` is a
+ * final safety net for anything else that slips through.
+ */
+/**
+ * Space-like and typographic characters WinAnsi can render, mapped to plain ASCII.
+ * U+00A0 and U+202F are normalised rather than dropped so words do not run together.
+ */
+const ASCII_FOLD: Record<string, string> = {
+  '\u00A0': ' ', '\u202F': ' ', '\u2007': ' ', '\u2009': ' ',
+  '\u2010': '-', '\u2011': '-', '\u2012': '-', '\u2013': '-', '\u2014': '-', '\u2212': '-',
+  '\u2018': "'", '\u2019': "'", '\u201A': "'", '\u201B': "'",
+  '\u201C': '"', '\u201D': '"', '\u201E': '"',
+  '\u2026': '...', '\u00D7': 'x',
+};
+
+export function toLatin1(text: string): string {
+  return text
+    .replace(/[\u00A0\u202F\u2007\u2009\u2010-\u2014\u2212\u2018-\u201F\u2026\u00D7]/g, (char) => ASCII_FOLD[char] ?? '')
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, '');
+}
+
+function fmt(value: number, currency = BASE_CURRENCY): string {
+  const code = (currency || BASE_CURRENCY).toUpperCase();
+  const digits = minorUnitDigits(code);
+  const text = new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency,
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-  }).format(v);
+    currency: code,
+    currencyDisplay: 'code',
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(Math.round((Number(value) || 0) * 1000) / 1000);
+  return toLatin1(text);
 }
 
 function dateFmt(value: Date | null | undefined): string {
@@ -55,7 +83,7 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 48;
   const contentWidth = pageWidth - margin * 2;
-  const currency = booking.currency || 'INR';
+  const currency = booking.currency || BASE_CURRENCY;
 
   const em = { semi: 'helvetica', bold: 'helvetica', size: 10 };
 

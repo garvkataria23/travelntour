@@ -3,6 +3,7 @@ import { Customer, CustomerStatus, Prisma } from '@prisma/client';
 import { AuthUser } from '../common/current-user.decorator';
 import { normalizePhone, isValidPhone } from '../common/utils';
 import { paginationMeta } from '../common/pagination';
+import { isUniqueViolation } from '../common/prisma-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
@@ -159,14 +160,28 @@ export class CustomersService {
       return { ...existing, existed: true };
     }
 
-    const created = await this.prisma.customer.create({
-      data: {
-        businessId: user.businessId,
-        name: dto.name,
-        phone,
-        email: dto.email,
-      },
-    });
+    let created;
+    try {
+      created = await this.prisma.customer.create({
+        data: {
+          businessId: user.businessId,
+          name: dto.name,
+          phone,
+          email: dto.email,
+        },
+      });
+    } catch (err) {
+      // Two staff adding the same new phone number at the same instant both miss the check
+      // above. The unique constraint rejects the loser - hand back the winner's record
+      // instead of failing the whole request.
+      if (isUniqueViolation(err)) {
+        const raced = await this.prisma.customer.findUnique({
+          where: { businessId_phone: { businessId: user.businessId, phone } },
+        });
+        if (raced) return { ...raced, existed: true };
+      }
+      throw err;
+    }
     await this.audit.log(user, 'CUSTOMER_CREATED', 'Customer', created.id, {
       name: created.name,
       phone: created.phone,
@@ -198,7 +213,25 @@ export class CustomersService {
       }
       data.phone = phone;
     }
-    const updated = await this.prisma.customer.update({ where: { id }, data });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // Optimistic lock, same contract as bookings: reject the write if a colleague has
+      // saved this customer since the client read it.
+      const result = await tx.customer.updateMany({
+        where: { id, businessId: user.businessId, version: dto.version },
+        data: { ...data, version: { increment: 1 } },
+      });
+      if (result.count === 0) {
+        const current = await tx.customer.findUnique({ where: { id } });
+        if (!current) {
+          throw new BadRequestException({ message: 'Customer not found', code: 'CUSTOMER_NOT_FOUND' });
+        }
+        throw new ConflictException({
+          message: 'This customer was changed by someone else while you were editing it. Reload to see their changes.',
+          code: 'EDIT_CONFLICT',
+        });
+      }
+      return tx.customer.findFirstOrThrow({ where: { id } });
+    });
     await this.audit.log(user, 'CUSTOMER_UPDATED', 'Customer', id, { fields: Object.keys(data) });
     return updated;
   }

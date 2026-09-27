@@ -1,10 +1,13 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
-import { Booking, BookingStatus, Customer } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
+import { Booking, BookingStatus, Customer, Prisma } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/current-user.decorator';
+import { allocateInvoiceNumber } from '../common/invoice-number';
 import { paginationMeta } from '../common/pagination';
+import { isUniqueViolation } from '../common/prisma-error';
 import { isValidPhone, normalizePhone, parseAirportInput } from '../common/utils';
+import { BASE_CURRENCY } from '../currency/decimals';
 import { PrismaService } from '../prisma/prisma.service';
 import { AutomationService } from '../automation/automation.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
@@ -265,18 +268,31 @@ export class BookingsService {
       if (found) {
         customer = found;
       } else {
-        customer = await this.prisma.customer.create({
-          data: {
-            businessId: user.businessId,
-            name: c.name,
-            phone,
-            email: c.email,
-          },
-        });
-        await this.audit.log(user, 'CUSTOMER_CREATED', 'Customer', customer.id, {
-          name: customer.name,
-          phone: customer.phone,
-        });
+        try {
+          customer = await this.prisma.customer.create({
+            data: {
+              businessId: user.businessId,
+              name: c.name,
+              phone,
+              email: c.email,
+            },
+          });
+        } catch (err) {
+          // A colleague created the same phone number between our lookup and this insert.
+          // Reuse their record rather than failing the booking and losing the entry.
+          if (!isUniqueViolation(err)) throw err;
+          const raced = await this.prisma.customer.findUnique({
+            where: { businessId_phone: { businessId: user.businessId, phone } },
+          });
+          if (!raced) throw err;
+          customer = raced;
+        }
+        if (customer.name === c.name) {
+          await this.audit.log(user, 'CUSTOMER_CREATED', 'Customer', customer.id, {
+            name: customer.name,
+            phone: customer.phone,
+          });
+        }
       }
     }
 
@@ -299,8 +315,13 @@ export class BookingsService {
     };
 
     // Accounting: resolve GST rate, compute tax and optional invoice number.
-    const setting = await this.prisma.businessSetting.findUnique({ where: { businessId: user.businessId } });
+    const [setting, businessForCurrency] = await Promise.all([
+      this.prisma.businessSetting.findUnique({ where: { businessId: user.businessId } }),
+      this.prisma.business.findUnique({ where: { id: user.businessId }, select: { currency: true } }),
+    ]);
     const resolvedTaxRate = dto.taxRate ?? (setting?.gstEnabled ? setting?.gstRate ?? 0 : 0);
+    // Amounts are always stored in the business base currency; the UI converts for display.
+    const resolvedCurrency = dto.currency || businessForCurrency?.currency || BASE_CURRENCY;
     const baseFare = dto.baseFare ?? dto.amount ?? 0;
     const discount = dto.discount ?? 0;
     const taxable = Math.max(0, baseFare - discount);
@@ -312,14 +333,7 @@ export class BookingsService {
       let invoiceNumber: string | null = null;
       let invoiceIssuedAt: Date | null = null;
       if (dto.generateInvoice) {
-        const bs = await tx.businessSetting.findUnique({ where: { businessId: user.businessId } });
-        const nextNo = bs?.nextInvoiceNo ?? 1;
-        invoiceNumber = `${bs?.invoicePrefix || 'INV'}-${String(nextNo).padStart(5, '0')}`;
-        await tx.businessSetting.upsert({
-          where: { businessId: user.businessId },
-          create: { businessId: user.businessId, nextInvoiceNo: nextNo + 1 },
-          update: { nextInvoiceNo: { increment: 1 } },
-        });
+        invoiceNumber = await allocateInvoiceNumber(tx, user.businessId);
         invoiceIssuedAt = new Date();
       }
       const booking = await tx.booking.create({
@@ -340,7 +354,7 @@ export class BookingsService {
           status: (dto.status as BookingStatus) ?? 'CONFIRMED',
           source: dto.source,
           amount: dto.amount,
-          currency: dto.currency,
+          currency: resolvedCurrency,
           baseFare: dto.baseFare,
           cost: dto.cost,
           discount: dto.discount,
@@ -454,26 +468,59 @@ export class BookingsService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const booking = await tx.booking.update({
-        where: { id },
-        data,
-        include: { customer: true },
+      // Optimistic lock: only the caller whose `version` still matches is allowed to write.
+      // Two staff editing the same booking used to silently overwrite each other because
+      // the read-modify-write was unguarded.
+      const result = await tx.booking.updateMany({
+        where: { id, businessId: user.businessId, version: dto.version },
+        data: { ...data, version: { increment: 1 }, updatedBy: user.id },
       });
-      return booking;
+      if (result.count === 0) {
+        throw new ConflictException({
+          message: await this.conflictMessage(tx, id, user.id),
+          code: 'EDIT_CONFLICT',
+        });
+      }
+      return tx.booking.findFirstOrThrow({ where: { id }, include: { customer: true } });
     });
 
-    // Recompute reminders when departure details changed.
-    const dateChanged = dto.departureDate !== undefined;
-    const timeChanged = dto.departureTime !== undefined;
-    if (dateChanged || timeChanged || dto.from !== undefined || dto.to !== undefined) {
+    // Recompute reminders only when the journey details actually moved. The edit form
+    // submits every field on every save, and an unconditional resync re-queued reminders
+    // the customer had already received.
+    if (this.departureMoved(existing, data)) {
       await this.automation.syncForBookingUpdate({ booking: updated, customer: updated.customer });
     }
 
     await this.audit.log(user, 'BOOKING_UPDATED', 'Booking', id, {
       fields: Object.keys(data),
-      rescheduled: dateChanged || timeChanged,
+      rescheduled: this.departureMoved(existing, data),
     });
     return updated;
+  }
+
+  /** True when the patch genuinely changes when/where the passenger travels. */
+  private departureMoved(existing: Booking, data: Record<string, unknown>): boolean {
+    const nextDate = data.departureDate as Date | undefined;
+    if (nextDate !== undefined && nextDate.getTime() !== existing.departureDate.getTime()) return true;
+    const nextTime = data.departureTime as string | undefined;
+    if (nextTime !== undefined && nextTime !== existing.departureTime) return true;
+    if (data.fromAirport !== undefined && data.fromAirport !== existing.fromAirport) return true;
+    if (data.toAirport !== undefined && data.toAirport !== existing.toAirport) return true;
+    if (data.status !== undefined && data.status !== existing.status) return true;
+    return false;
+  }
+
+  /** Names whoever beat us to the save, so the UI can say "Ram changed this". */
+  private async conflictMessage(tx: Prisma.TransactionClient, id: string, selfId: string): Promise<string> {
+    const current = await tx.booking.findUnique({
+      where: { id },
+      include: { lastEditor: { select: { id: true, name: true } } },
+    });
+    const editor = current?.lastEditor;
+    if (editor && editor.id !== selfId) {
+      return `${editor.name} changed this booking while you were editing it. Reload to see their changes.`;
+    }
+    return 'This booking was changed by someone else while you were editing it. Reload to see their changes.';
   }
 
   // ------------------------------------------------------------------
@@ -515,10 +562,18 @@ export class BookingsService {
       return { ...existing, alreadyCancelled: true };
     }
 
-    const cancelled = await this.prisma.booking.update({
-      where: { id },
-      data: { status: 'CANCELLED' },
+    // Flip the status behind a conditional write. Bumping `version` here makes a
+    // colleague's already-open edit form fail with EDIT_CONFLICT instead of resurrecting
+    // the booking by writing CONFIRMED over CANCELLED.
+    const claimed = await this.prisma.booking.updateMany({
+      where: { id, businessId: user.businessId, status: { not: 'CANCELLED' } },
+      data: { status: 'CANCELLED', version: { increment: 1 }, updatedBy: user.id },
     });
+    if (claimed.count === 0) {
+      return { ...existing, alreadyCancelled: true };
+    }
+
+    const cancelled = await this.prisma.booking.findUniqueOrThrow({ where: { id } });
 
     // Cancel all future pending reminders.
     await this.automation.syncForBookingCancel(id);
@@ -539,6 +594,14 @@ export class BookingsService {
   // ------------------------------------------------------------------
 
   async remove(user: AuthUser, id: string) {
+    // Deleting cascades away the invoice and WhatsApp history and there is no undo, so it
+    // is an admin action. Staff should cancel a booking instead - that keeps the record.
+    if (user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
+      throw new ForbiddenException({
+        message: 'Only an admin can delete a booking. Cancel it instead to keep the record.',
+        code: 'DELETE_REQUIRES_ADMIN',
+      });
+    }
     const existing = await this.prisma.booking.findFirst({
       where: { id, businessId: user.businessId },
     });

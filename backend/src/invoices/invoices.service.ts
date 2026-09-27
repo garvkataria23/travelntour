@@ -1,9 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Booking, InvoiceItem, InvoicePaymentStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/current-user.decorator';
+import { allocateInvoiceNumber } from '../common/invoice-number';
 import { paginationMeta } from '../common/pagination';
+import { BASE_CURRENCY, formatMoney } from '../currency/decimals';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { CreateInvoiceItemDto, SetPaymentDto, UpdateInvoiceItemDto } from './dto/invoice.dto';
@@ -70,7 +72,7 @@ export class InvoicesService {
       departureDate: booking.departureDate,
       departureTime: booking.departureTime,
       amount: booking.amount,
-      currency: booking.currency || 'INR',
+      currency: booking.currency || BASE_CURRENCY,
       baseFare: booking.baseFare,
       discount: booking.discount,
       taxRate: booking.taxRate,
@@ -226,17 +228,24 @@ export class InvoicesService {
     }
 
     const issued = await this.prisma.$transaction(async (tx) => {
-      const bs = await tx.businessSetting.findUnique({ where: { businessId: user.businessId } });
-      const nextNo = bs?.nextInvoiceNo ?? 1;
-      const invoiceNumber = `${bs?.invoicePrefix || 'INV'}-${String(nextNo).padStart(5, '0')}`;
-      await tx.businessSetting.upsert({
-        where: { businessId: user.businessId },
-        create: { businessId: user.businessId, nextInvoiceNo: nextNo + 1 },
-        update: { nextInvoiceNo: { increment: 1 } },
+      // Claim the booking first: the conditional update means only the caller that
+      // changes invoiceNumber from NULL actually wins, so two staff issuing at the same
+      // moment cannot overwrite each other or burn two invoice numbers.
+      const claimed = await tx.booking.updateMany({
+        where: { id, businessId: user.businessId, invoiceNumber: null },
+        data: { invoiceIssuedAt: new Date() },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException({
+          message: 'This invoice was already issued by someone else',
+          code: 'INVOICE_ALREADY_ISSUED',
+        });
+      }
+
+      const invoiceNumber = await allocateInvoiceNumber(tx, user.businessId);
       return tx.booking.update({
         where: { id },
-        data: { invoiceNumber, invoiceIssuedAt: new Date() },
+        data: { invoiceNumber },
         include: {
           customer: { select: { id: true, name: true, phone: true, email: true } },
           invoiceItems: { orderBy: { sortOrder: 'asc' } },
@@ -414,7 +423,7 @@ export class InvoicesService {
       base64: pdf.toString('base64'),
       total: totals.total,
       paymentStatus: booking.paymentStatus,
-      currency: booking.currency || 'INR',
+      currency: booking.currency || BASE_CURRENCY,
     };
   }
 
@@ -436,10 +445,10 @@ export class InvoicesService {
     }
 
     const fileName = `Invoice-${booking.invoiceNumber}.pdf`;
-    const caption = `Dear ${booking.customer.name}, here is your invoice ${booking.invoiceNumber}. Total: ${new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: booking.currency || 'INR',
-    }).format(totals.total)}`;
+    const caption = `Dear ${booking.customer.name}, here is your invoice ${booking.invoiceNumber}. Total: ${formatMoney(
+      totals.total,
+      booking.currency || BASE_CURRENCY,
+    )}`;
 
     const result = await this.whatsapp.sendDocument({
       to: booking.customer.phone,

@@ -117,7 +117,7 @@ model Business {
   email     String?
   phone     String?
   timezone  String         @default("Asia/Kolkata")
-  currency  String         @default("INR")
+  currency  String         @default("AED")
   status    BusinessStatus @default(ACTIVE)
 
   users           User[]
@@ -152,6 +152,7 @@ model User {
 
   business       Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
   bookings       Booking[]
+  editedBookings Booking[]      @relation("BookingLastEditor")
   expenses       Expense[]
   incomes        Income[]
   refreshTokens  RefreshToken[]
@@ -184,11 +185,11 @@ model RefreshToken {
 model BusinessSetting {
   id                 String   @id @default(uuid())
   businessId         String   @unique
-  currency           String   @default("INR")
+  currency           String   @default("AED")
   timezone           String   @default("Asia/Kolkata")
   defaultAirline     String?
   defaultTerminal    String?
-  defaultCurrency    String   @default("INR")
+  defaultCurrency    String   @default("AED")
   notifyConfirmation Boolean  @default(true)
   notify48h          Boolean  @default(true)
   notify24h          Boolean  @default(true)
@@ -214,6 +215,7 @@ model Customer {
   phone      String
   email      String?
   status     CustomerStatus @default(ACTIVE)
+  version    Int            @default(0)
 
   business  Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
   bookings  Booking[]
@@ -256,7 +258,7 @@ model Booking {
 
   baseFare  Float?  // gross fare before discount (taxable value)
   cost      Float?  // direct cost of the ticket (COGS)
-  discount  Float?  // discount in ₹ applied to baseFare
+  discount  Float?  // discount in the booking currency applied to baseFare
   taxRate   Float?  // GST % applied to this booking
   taxAmount Float?  // GST amount = (baseFare - discount) * taxRate/100
 
@@ -267,10 +269,13 @@ model Booking {
   paidAmount    Float?
 
   createdBy String
+  updatedBy String?
+  version   Int     @default(0)
 
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  creator  User     @relation(fields: [createdBy], references: [id])
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  creator  User      @relation(fields: [createdBy], references: [id])
+  lastEditor User?   @relation("BookingLastEditor", fields: [updatedBy], references: [id], onDelete: SetNull)
 
   scheduledMessages ScheduledMessage[]
   messageLogs       MessageLog[]
@@ -280,10 +285,10 @@ model Booking {
   updatedAt DateTime @updatedAt
 
   @@unique([businessId, pnr])
+  @@unique([businessId, invoiceNumber])
   @@index([businessId])
   @@index([businessId, departureDate])
   @@index([businessId, status])
-  @@index([businessId, invoiceNumber])
   @@index([departureDate])
 }
 
@@ -311,7 +316,7 @@ model Expense {
   title       String
   description String?
   amount     Float
-  currency   String @default("INR")
+  currency   String @default("AED")
   payableTo  String?
   incurredOn DateTime @default(now())
   createdBy  String
@@ -334,7 +339,7 @@ model Income {
   title      String
   note       String?
   amount     Float
-  currency   String         @default("INR")
+  currency   String         @default("AED")
   reference  String?
   receivedOn DateTime       @default(now())
   createdBy  String
