@@ -4,6 +4,7 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { StatCard } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatCurrency } from "@/lib/api";
+import { useDisplayCurrency } from "@/lib/currency";
 import { FormEvent, useState } from "react";
 import { CalendarDays, Plus, Receipt, Search, Trash2, TrendingDown, TrendingUp, Wallet, X } from "lucide-react";
 
@@ -35,6 +36,7 @@ interface ExpenseStats {
 }
 
 export default function ExpensesPage() {
+  useDisplayCurrency();
   const [addOpen, setAddOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
@@ -181,7 +183,7 @@ function AddExpenseModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
           </div>
           <label className="block"><span className="mb-2 block text-sm font-semibold">Title *</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Airline ticket settlement" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block"><span className="mb-2 block text-sm font-semibold">Amount (₹) *</span><input type="number" min="0" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="e.g. 25000" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+            <label className="block"><span className="mb-2 block text-sm font-semibold">Amount (AED) *</span><input type="number" min="0" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="e.g. 25000" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
             <label className="block"><span className="mb-2 block text-sm font-semibold">Payable To</span><input value={payableTo} onChange={(event) => setPayableTo(event.target.value)} placeholder="e.g. Vendor name" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
           </div>
           <label className="block"><span className="mb-2 block text-sm font-semibold">Date Incurred</span><span className="relative flex h-11 items-center gap-2 rounded-lg border border-[#d6e1ef] px-3"><CalendarDays className="h-4 w-4 text-[#65728a]" /><input type="date" value={incurredOn} onChange={(event) => setIncurredOn(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm outline-none" /><span className="text-xs text-[#65728a]">defaults to today</span></span></label>

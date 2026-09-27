@@ -7,6 +7,7 @@ import { BackLink } from "@/components/dashboard/back-link";
 import { StatCard, StatusBadge, initialsOf } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatCurrency, formatDate, statusTone } from "@/lib/api";
+import { useDisplayCurrency } from "@/lib/currency";
 import { Ban, CalendarDays, Edit, Mail, MessageCircle, Phone, Plane, PlaneLanding, PlaneTakeoff, Plus, Star, X } from "lucide-react";
 import { FormEvent, useState } from "react";
 
@@ -34,6 +35,7 @@ interface CustomerDetail {
   phone: string;
   email: string | null;
   status: string;
+  version: number;
   createdAt: string;
   stats: { totalBookings: number; upcomingTrips: number; totalSpent: number };
   bookings: CustomerBooking[];
@@ -77,6 +79,7 @@ function tripDone(departureDate: string): boolean {
 export default function CustomerDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  useDisplayCurrency();
   const detail = useApi<CustomerDetail>(id ? `/customers/${id}` : null);
   const customer = detail.data;
   const bookings = customer?.bookings ?? [];
@@ -232,7 +235,7 @@ function EditCustomerModal({ customer, onClose, onSaved }: { customer: CustomerD
     setSubmitting(true);
     setMError("");
     try {
-      await api(`/customers/${customer?.id}`, { method: "PATCH", body: { name: form.name, phone: form.phone, email: form.email.trim() || undefined, status: form.status } });
+      await api(`/customers/${customer?.id}`, { method: "PATCH", body: { version: customer?.version ?? 0, name: form.name, phone: form.phone, email: form.email.trim() || undefined, status: form.status } });
       onSaved("Customer updated successfully.");
     } catch (err) {
       setMError(err instanceof Error ? err.message : "Unable to update customer");

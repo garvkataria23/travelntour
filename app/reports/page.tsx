@@ -4,6 +4,7 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { StatCard } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { useDisplayCurrency } from "@/lib/currency";
 import { CalendarDays, Download, MessageCircle, Plane, TrendingDown, TrendingUp, Users, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -90,6 +91,7 @@ interface BookingExportItem {
 interface BookingExportList { items: BookingExportItem[]; meta?: { total: number } }
 
 export default function ReportsPage() {
+  useDisplayCurrency();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [active, setActive] = useState<Tab>("Overview");
@@ -265,7 +267,7 @@ export default function ReportsPage() {
 
             {active === "Revenue" ? (
               <div className="grid gap-3 lg:grid-cols-[1.5fr_1fr]">
-                <Card title={`Revenue Trend (${revenueRep.data?.currency ?? "INR"})`}>
+                <Card title={`Revenue Trend (${revenueRep.data?.currency ?? "AED"})`}>
                   <RevenueChart byMonth={byMonth} max={maxRevenue} currency={revenueRep.data?.currency} tall />
                 </Card>
                 <Card title="Monthly Breakdown">
@@ -340,7 +342,7 @@ export default function ReportsPage() {
                   <MiniStat label="Operating Cost" value={expensesRep.data ? formatCurrency(expensesRep.data.operatingCost, expensesRep.data.currency) : "—"} color="text-[#596782]" />
                 </div>
                 <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr]">
-                  <Card title={`Expense Trend (${expensesRep.data?.currency ?? "INR"})`}>
+                  <Card title={`Expense Trend (${expensesRep.data?.currency ?? "AED"})`}>
                     <ExpenseMonthly byMonth={expensesRep.data?.byMonth ?? []} max={Math.max(1, ...(expensesRep.data?.byMonth ?? []).map((b) => b.total))} currency={expensesRep.data?.currency ?? undefined} />
                     <p className="mt-1 text-xs text-[#596782]">{from || to ? "in selected range" : "all time"}</p>
                   </Card>
@@ -379,7 +381,7 @@ export default function ReportsPage() {
                   <MiniStat label="Outstanding" value={invoicesRep.data ? formatCurrency(invoicesRep.data.outstanding, invoicesRep.data.currency) : "—"} color="text-rose-600" />
                 </div>
                 <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
-                  <Card title={`Billing & Collections (${invoicesRep.data?.currency ?? "INR"})`}>
+                  <Card title={`Billing & Collections (${invoicesRep.data?.currency ?? "AED"})`}>
                     <InvoiceMonthly byMonth={invoicesRep.data?.byMonth ?? []} max={Math.max(1, ...(invoicesRep.data?.byMonth ?? []).map((b) => b.billed))} currency={invoicesRep.data?.currency ?? undefined} />
                     <p className="mt-1 text-xs text-[#596782]">{from || to ? "in selected range" : "all time"}</p>
                   </Card>

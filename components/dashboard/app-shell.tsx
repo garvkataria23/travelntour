@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { AlertTriangle, Banknote, BarChart3, Bell, CalendarCheck, Check, ChevronDown, Clock3, Command, FileText, Home, LogOut, Menu, MessageCircle, Plane, Plus, Receipt, Search, Settings, Users, Wallet, Workflow, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Banknote, BarChart3, Bell, CalendarCheck, Check, ChevronDown, Clock3, Command, FileText, Home, LogOut, Menu, MessageCircle, Plane, Plus, Receipt, RefreshCw, Search, Settings, Users, Wallet, Workflow, X, type LucideIcon } from "lucide-react";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { api, clearSession, formatDate, getAccessToken, getStoredUser, type ApiUser } from "@/lib/api";
 import { useApi, useOffline } from "@/lib/hooks";
+import { CurrencyProvider, useCurrency } from "@/lib/currency";
 
 const NAV_ITEMS: Array<{ label: string; href: string; icon: LucideIcon }> = [
   { label: "Dashboard", href: "/dashboard", icon: Home },
@@ -20,6 +21,7 @@ const NAV_ITEMS: Array<{ label: string; href: string; icon: LucideIcon }> = [
   { label: "Invoices", href: "/invoices", icon: Receipt },
   { label: "Expenses", href: "/expenses", icon: Wallet },
   { label: "Income", href: "/income", icon: Banknote },
+  { label: "Currency", href: "/currency", icon: RefreshCw },
   { label: "Settings", href: "/settings", icon: Workflow },
 ];
 
@@ -29,7 +31,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [user, setUser] = useState<ApiUser | null>(null);
   const router = useRouter();
-  const me = useApi<{ business?: { name?: string | null } }>("/settings");
+  const me = useApi<{ business?: { name?: string | null; currency?: string | null } }>("/settings");
   const offline = useOffline();
 
   useEffect(() => {
@@ -51,24 +53,26 @@ export function AppShell({ children }: { children: ReactNode }) {
   const businessName = me.data?.business?.name || user.name;
 
   return (
-    <div className="flyconnect-app min-h-screen bg-[#f4f9ff] text-[#08142e]">
-      <Sidebar open={open} onClose={() => setOpen(false)} user={user} onLogout={() => setLogoutOpen(true)} expanded={railHover} onHoverChange={setRailHover} />
-      <div className={`min-h-screen transition-[padding] duration-200 ${railHover ? "lg:pl-[237px]" : "lg:pl-[76px]"}`}>
-        <Topbar onMenu={() => setOpen(true)} user={user} businessName={businessName} onLogout={() => setLogoutOpen(true)} />
-        {offline ? (
-          <div className="flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm font-semibold text-amber-800" role="status">
-            <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-            Offline — showing saved data. Reconnecting…
-          </div>
-        ) : null}
-        <main className="px-4 py-4 sm:px-6 lg:px-5 xl:px-8">{children}</main>
+    <CurrencyProvider businessCurrency={me.data?.business?.currency}>
+      <div className="flyconnect-app min-h-screen bg-[#f4f9ff] text-[#08142e]">
+        <Sidebar open={open} onClose={() => setOpen(false)} user={user} onLogout={() => setLogoutOpen(true)} expanded={railHover} onHoverChange={setRailHover} />
+        <div className={`min-h-screen transition-[padding] duration-200 ${railHover ? "lg:pl-[237px]" : "lg:pl-[76px]"}`}>
+          <Topbar onMenu={() => setOpen(true)} user={user} businessName={businessName} onLogout={() => setLogoutOpen(true)} />
+          {offline ? (
+            <div className="flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm font-semibold text-amber-800" role="status">
+              <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+              Offline — showing saved data. Reconnecting…
+            </div>
+          ) : null}
+          <main className="px-4 py-4 sm:px-6 lg:px-5 xl:px-8">{children}</main>
+        </div>
+        <LogoutDialog
+          open={logoutOpen}
+          onCancel={() => setLogoutOpen(false)}
+          onConfirm={() => { clearSession(); router.replace("/"); }}
+        />
       </div>
-      <LogoutDialog
-        open={logoutOpen}
-        onCancel={() => setLogoutOpen(false)}
-        onConfirm={() => { clearSession(); router.replace("/"); }}
-      />
-    </div>
+    </CurrencyProvider>
   );
 }
 
@@ -145,10 +149,101 @@ function Topbar({ onMenu, user, businessName, onLogout }: { onMenu: () => void; 
         <GlobalSearch />
       </div>
       <div className="ml-3 flex items-center gap-3 sm:gap-5">
+        <CurrencyToggle />
         <NotificationsBell />
         <AccountMenu user={user} businessName={businessName} onLogout={onLogout} />
       </div>
     </header>
+  );
+}
+
+/** Compact display-currency picker. Rates come from the backend cache; the choice is per browser. */
+function CurrencyToggle() {
+  const { display, base, setDisplay, options } = useCurrency();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const term = query.trim().toLowerCase();
+  const filtered = options
+    .filter((option) => !term || option.code.toLowerCase().includes(term) || option.name.toLowerCase().includes(term))
+    .slice(0, 60);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Display currency: ${display}. Change currency`}
+        className="flex h-[38px] items-center gap-1.5 rounded-lg border border-[#dde7f3] bg-[#f5f8fc] px-2.5 text-[13px] font-bold text-[#1c2b4a] transition hover:border-[#1688f9] hover:bg-white"
+      >
+        <span className="max-w-[68px] truncate">{display}</span>
+        <ChevronDown className={`h-4 w-4 text-[#526486] transition ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open ? (
+        <div className="absolute right-0 top-[46px] z-40 w-[290px] overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-xl">
+          <div className="border-b border-[#eef3f9] p-2">
+            <input
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search currency…"
+              className="w-full rounded-lg border border-[#e2eaf5] px-2.5 py-1.5 text-[13px] outline-none focus:border-[#1688f9]"
+            />
+          </div>
+          <div className="max-h-[320px] overflow-y-auto">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-4 text-center text-[13px] text-[#7c8aa3]">No currency matches “{query}”</div>
+            ) : (
+              filtered.map((option) => {
+                const active = option.code === display;
+                return (
+                  <button
+                    key={option.code}
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    onClick={() => {
+                      setDisplay(option.code);
+                      setOpen(false);
+                      setQuery("");
+                    }}
+                    className={`flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-slate-50 ${active ? "bg-[#eef6ff]" : ""}`}
+                  >
+                    <span className="w-11 shrink-0 text-[12px] font-extrabold text-[#1c2b4a]">{option.code}</span>
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-[#4a5a75]">{option.name}</span>
+                    {option.code === base ? <span className="shrink-0 rounded bg-[#e7f1ff] px-1.5 py-0.5 text-[10px] font-bold text-[#1688f9]">BASE</span> : null}
+                    {active ? <Check className="h-4 w-4 shrink-0 text-[#1688f9]" /> : null}
+                  </button>
+                );
+              })
+            )}
+          </div>
+          <div className="border-t border-[#eef3f9] px-3 py-2 text-[11px] text-[#7c8aa3]">
+            Amounts are stored in {base} and converted for display.
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

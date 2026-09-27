@@ -97,8 +97,8 @@ const SAMPLE_VALUES: Record<string, string> = {
   journey_date: "28 Sep 2026",
   journey_time: "10:30 AM",
   terminal: "T2",
-  amount: "₹12,450",
-  currency: "INR",
+  amount: "AED 12,450",
+  currency: "AED",
   airport_from: "Chhatrapati Shivaji Maharaj Intl (BOM)",
   airport_to: "Indira Gandhi Intl (DEL)",
 };

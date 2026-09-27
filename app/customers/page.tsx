@@ -5,6 +5,7 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { Pagination, StatCard, initialsOf } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatCurrency, formatDate, statusTone } from "@/lib/api";
+import { useDisplayCurrency } from "@/lib/currency";
 import { AlertTriangle, CalendarDays, Edit, Mail, MessageCircle, MoreHorizontal, Phone, Plane, Plus, Repeat, Search, UserCheck, Users, UserX, X } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
@@ -30,6 +31,7 @@ interface CustomerItem {
   phone: string;
   email: string | null;
   status: string;
+  version: number;
   createdAt: string;
   totalBookings: number;
   lastJourney: {
@@ -50,6 +52,7 @@ interface CustomerDetail {
   phone: string;
   email: string | null;
   status: string;
+  version: number;
   createdAt: string;
   stats: { totalBookings: number; upcomingTrips: number; totalSpent: number };
   bookings: Array<{
@@ -104,7 +107,7 @@ function CustomerFormModal({ mode, customer, onClose, onSaved }: { mode: "create
     setMError("");
     try {
       if (mode === "edit" && customer) {
-        await api(`/customers/${customer.id}`, { method: "PATCH", body: { name: form.name, phone: form.phone, email: form.email.trim() || undefined, status: form.status } });
+        await api(`/customers/${customer.id}`, { method: "PATCH", body: { version: customer.version, name: form.name, phone: form.phone, email: form.email.trim() || undefined, status: form.status } });
         onSaved({ existed: false });
       } else {
         const res = await api<{ id?: string; existed?: boolean }>("/customers", { method: "POST", body: { name: form.name, phone: form.phone, email: form.email.trim() || undefined } });
@@ -189,6 +192,7 @@ function DeleteDialog({ customer, onClose, onDeleted }: { customer: CustomerItem
 }
 
 export default function CustomersPage() {
+  useDisplayCurrency();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
@@ -212,9 +216,10 @@ export default function CustomersPage() {
   params.set("page", String(page));
   params.set("limit", "8");
 
-  const stats = useApi<CustomerStats>("/customers/stats");
-  const list = useApi<CustomerList>(`/customers?${params.toString()}`);
-  const panel = useApi<CustomerDetail>(selectedId ? `/customers/${selectedId}` : null);
+  const POLL_MS = 15000;
+  const stats = useApi<CustomerStats>("/customers/stats", { refetchInterval: POLL_MS });
+  const list = useApi<CustomerList>(`/customers?${params.toString()}`, { refetchInterval: POLL_MS });
+  const panel = useApi<CustomerDetail>(selectedId ? `/customers/${selectedId}` : null, { refetchInterval: POLL_MS });
 
   useEffect(() => {
     if (list.data?.items.length && !pickedRef.current) {

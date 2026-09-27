@@ -4,6 +4,7 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { StatCard } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatCurrency } from "@/lib/api";
+import { useDisplayCurrency } from "@/lib/currency";
 import { useState } from "react";
 import { Banknote, CheckCircle2, ChevronLeft, ChevronRight, Download, FileText, Receipt, Search, TrendingDown } from "lucide-react";
 import Link from "next/link";
@@ -53,6 +54,7 @@ interface InvoiceList {
 }
 
 export default function InvoicesPage() {
+  useDisplayCurrency();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
@@ -67,7 +69,7 @@ export default function InvoicesPage() {
   params.set("page", String(page));
   params.set("limit", String(limit));
 
-  const list = useApi<InvoiceList>(`/invoices?${params.toString()}`);
+  const list = useApi<InvoiceList>(`/invoices?${params.toString()}`, { refetchInterval: 15000 });
   const pageIds = list.data?.items.map((row) => row.id) ?? [];
 
   function toggleSelect(id: string) {

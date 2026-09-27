@@ -112,8 +112,9 @@ export default function WhatsAppMessagesPage() {
   params.set("page", String(page));
   params.set("limit", "10");
 
-  const list = useApi<MessageList>(`/messages?${params.toString()}`);
-  const panel = useApi<MessageDetail>(selectedId ? `/messages/${selectedId}` : null);
+  const POLL_MS = 15000;
+  const list = useApi<MessageList>(`/messages?${params.toString()}`, { refetchInterval: POLL_MS });
+  const panel = useApi<MessageDetail>(selectedId ? `/messages/${selectedId}` : null, { refetchInterval: POLL_MS });
 
   const stats = list.data?.stats;
   const total = stats?.total ?? 0;

@@ -4,6 +4,7 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { initialsOf } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api } from "@/lib/api";
+import { BASE_CURRENCY, useCurrency } from "@/lib/currency";
 import { Bell, Briefcase, ReceiptText, User } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -37,7 +38,7 @@ const NOTIF_ROWS: Array<{ title: string; sub: string; key: PrefKey }> = [
 
 const TIMEZONES = ["Asia/Kolkata", "Asia/Karachi", "Asia/Dubai", "Asia/Singapore", "Asia/Bangkok", "UTC", "Europe/London", "America/New_York", "America/Chicago", "America/Los_Angeles", "Australia/Sydney"];
 
-const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "PKR", "SGD"];
+const FALLBACK_CURRENCIES = ["AED", "INR", "USD", "EUR", "GBP", "PKR", "SGD", "SAR", "QAR", "OMR", "BHD", "KWD"];
 
 const ROLE_LABELS: Record<string, string> = {
   SUPER_ADMIN: "Super Admin",
@@ -61,6 +62,8 @@ export default function SettingsPage() {
   const [actionError, setActionError] = useState("");
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   const settings = useApi<SettingsData>("/settings");
+  const { options: currencyOptions } = useCurrency();
+  const currencies = currencyOptions.length ? currencyOptions.map((option) => option.code) : FALLBACK_CURRENCIES;
 
   const profile = settings.data?.profile;
   const biz = settings.data?.business;
@@ -70,7 +73,7 @@ export default function SettingsPage() {
   const [bizEmail, setBizEmail] = useState("");
   const [bizPhone, setBizPhone] = useState("");
   const [timezone, setTimezone] = useState(TIMEZONES[0]);
-  const [currency, setCurrency] = useState("INR");
+  const [currency, setCurrency] = useState(BASE_CURRENCY);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [gstEnabled, setGstEnabled] = useState(false);
@@ -87,7 +90,7 @@ export default function SettingsPage() {
       setBizEmail(b.email ?? "");
       setBizPhone(b.phone ?? "");
       setTimezone(b.timezone || TIMEZONES[0]);
-      setCurrency(b.currency || "INR");
+      setCurrency(b.currency || BASE_CURRENCY);
     }
     if (settings.data?.preferences) {
       const p = settings.data.preferences;
@@ -124,7 +127,7 @@ export default function SettingsPage() {
     setBizEmail(b?.email ?? "");
     setBizPhone(b?.phone ?? "");
     setTimezone(b?.timezone || TIMEZONES[0]);
-    setCurrency(b?.currency || "INR");
+    setCurrency(b?.currency || BASE_CURRENCY);
   }
 
   async function saveBusiness() {
@@ -238,7 +241,7 @@ export default function SettingsPage() {
                   <label className="block"><span className="mb-1 block font-semibold">Business Email</span><input value={bizEmail} onChange={(e) => setBizEmail(e.target.value)} placeholder="support@business.com" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 outline-none focus:border-[#1688f9]" /></label>
                   <label className="block"><span className="mb-1 block font-semibold">Business Phone</span><input value={bizPhone} onChange={(e) => setBizPhone(e.target.value)} placeholder="+91 90000 00000" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 outline-none focus:border-[#1688f9]" /></label>
                   <label className="block"><span className="mb-1 block font-semibold">Timezone</span><select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] bg-white px-3 outline-none">{TIMEZONES.map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
-                  <label className="block"><span className="mb-1 block font-semibold">Default Currency</span><select value={currency} onChange={(e) => setCurrency(e.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] bg-white px-3 outline-none">{CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
+                  <label className="block"><span className="mb-1 block font-semibold">Default Currency <span className="font-normal text-[#596782]">(amounts are saved in {BASE_CURRENCY})</span></span><select value={currency} onChange={(e) => setCurrency(e.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] bg-white px-3 outline-none">{currencies.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
                 </div>
                 <div className="mt-5 flex items-center justify-end gap-3">
                   {settings.data?.whatsapp ? <span className="mr-auto rounded-md bg-[#d9f7e8] px-3 py-1 text-sm font-bold text-[#00a451]">WhatsApp: {settings.data.whatsapp.displayPhoneNumber}</span> : null}

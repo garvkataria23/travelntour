@@ -5,6 +5,7 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { Pagination, StatCard, StatusBadge, type ApiBookingRow } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { useDisplayCurrency } from "@/lib/currency";
 import { AlertTriangle, CalendarDays, CalendarCheck, ChevronLeft, ChevronRight, Clock3, MoreHorizontal, Plane, PlaneLanding, PlaneTakeoff, Plus, Search, Users, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -70,6 +71,7 @@ function airlineTag(airline?: string | null): string {
 const STATUS_OPTIONS = ["CONFIRMED", "PENDING", "COMPLETED", "CANCELLED"];
 
 export default function UpcomingJourneysPage() {
+  useDisplayCurrency();
   const now = useMemo(() => new Date(), []);
   const [range, setRange] = useState<RangeKey>("month");
   const [customFrom, setCustomFrom] = useState("");
@@ -116,8 +118,9 @@ export default function UpcomingJourneysPage() {
     return p.toString();
   };
 
-  const stats = useApi<BookingStats>("/bookings/stats");
-  const list = useApi<JourneyList>(`/bookings?${filterParams(20, page)}`);
+  const POLL_MS = 15000;
+  const stats = useApi<BookingStats>("/bookings/stats", { refetchInterval: POLL_MS });
+  const list = useApi<JourneyList>(`/bookings?${filterParams(20, page)}`, { refetchInterval: POLL_MS });
 
   const mStart = iso(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1));
   const mEnd = iso(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0));
@@ -155,7 +158,7 @@ export default function UpcomingJourneysPage() {
   monthCountParams.set("page", "1");
   const countMonth = useApi<JourneyList>(`/bookings?${monthCountParams.toString()}`);
 
-  const view = useApi<BookingDetail>(viewId ? `/bookings/${viewId}` : null);
+  const view = useApi<BookingDetail>(viewId ? `/bookings/${viewId}` : null, { refetchInterval: POLL_MS });
 
   const journeys = useMemo<Array<ApiBookingRow & { isToday: boolean }>>(
     () => (list.data?.items ?? []).map((b) => ({ ...b, isToday: dateKey(b.departureDate) === iso(now) })),
