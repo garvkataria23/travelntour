@@ -4,34 +4,11 @@ import { ArrowRight, Check, Eye, Globe2, LockKeyhole, Mail, Plane, User as UserI
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { api, hasActiveSession, setSession } from "@/lib/api";
-import { signInWithGoogle, signInWithEmail, signUpWithEmail, resetPassword, onAuthChange } from "@/lib/firebase";
+import { signInWithEmail, signUpWithEmail, resetPassword, onAuthChange } from "@/lib/firebase";
 import { getOrCreateUserProfile } from "@/lib/firestore";
 
 const EASY_ID = "blue";
 const EASY_PASSWORD = "aura";
-
-function GoogleIcon() {
-  return (
-    <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24">
-      <path
-        fill="#4285F4"
-        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.03h3.88c2.27-2.09 3.66-5.17 3.66-9.12z"
-      />
-      <path
-        fill="#34A853"
-        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.03c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.13C3.26 21.36 7.34 24 12 24z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M5.28 14.29c-.25-.72-.38-1.49-.38-2.29s.13-1.57.38-2.29V6.58H1.25C.45 8.18 0 9.98 0 12s.45 3.82 1.25 5.42l4.03-3.13z"
-      />
-      <path
-        fill="#EA4335"
-        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.13c.95-2.83 3.6-4.96 6.72-4.96z"
-      />
-    </svg>
-  );
-}
 
 export function LoginPage() {
   const router = useRouter();
@@ -46,7 +23,6 @@ export function LoginPage() {
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{ name?: string; userId?: string; password?: string }>({});
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
 
   // Forgot password modal state
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -92,48 +68,6 @@ export function LoginPage() {
       setReady(true);
     }
   }, [router]);
-
-  async function handleGoogleSignIn() {
-    setError("");
-    setMessage("");
-    setGoogleLoading(true);
-    try {
-      const { user } = await signInWithGoogle();
-      if (!user) throw new Error("Google sign-in was cancelled.");
-
-      // Sync user profile to Cloud Firestore
-      const profile = await getOrCreateUserProfile({
-        uid: user.uid,
-        email: user.email,
-        displayName: user.displayName,
-      });
-
-      const token = await user.getIdToken();
-      setSession(
-        {
-          accessToken: token,
-          refreshToken: user.refreshToken || token,
-          user: {
-            id: profile.uid,
-            name: profile.name,
-            email: profile.email,
-            role: profile.role,
-          },
-        },
-        remember
-      );
-
-      setMessage("Signed in successfully with Google! Redirecting…");
-      setTimeout(() => router.replace("/dashboard"), 400);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Google sign-in failed.";
-      if (!msg.includes("popup-closed-by-user")) {
-        setError(msg);
-      }
-    } finally {
-      setGoogleLoading(false);
-    }
-  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -297,24 +231,7 @@ export function LoginPage() {
               </p>
             </div>
 
-            {/* Google Sign-In Button */}
-            <button
-              type="button"
-              onClick={handleGoogleSignIn}
-              disabled={googleLoading || loading}
-              className="flex h-[52px] w-full items-center justify-center gap-3 rounded-xl border border-[#cfd9e5] bg-white text-[15px] font-bold text-[#071333] shadow-sm transition hover:bg-slate-50 hover:border-slate-400 active:scale-[0.99] disabled:opacity-60"
-            >
-              <GoogleIcon />
-              <span>{googleLoading ? "Signing in with Google..." : "Continue with Google"}</span>
-            </button>
-
-            <div className="my-5 flex items-center gap-4">
-              <div className="h-px flex-1 bg-[#e2e8f0]" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-[#94a3b8]">or continue with email</span>
-              <div className="h-px flex-1 bg-[#e2e8f0]" />
-            </div>
-
-            <form className="space-y-4" onSubmit={handleSubmit}>
+            <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
               {mode === "register" ? (
                 <label className="block">
                   <span className="mb-1.5 block text-[15px] font-semibold text-[#101b31]">Full Name / Agency Name</span>
