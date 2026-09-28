@@ -85,7 +85,10 @@ Four remotes must exist — see `rclone.conf.example` for the exact fields.
 > **Order matters, and it is not reversible.** Do these three steps in sequence:
 >
 > 1. Put the **crypt passwords** in your password manager.
-> 2. *Then* run `sudo rclone config password` to encrypt the config file.
+> 2. *Then* run `sudo rclone config encryption set` to encrypt the config file.
+>    (`rclone config password` is a different command — it updates an existing
+>    remote's password and encrypts nothing. Verify with
+>    `sudo rclone config encryption check`.)
 > 3. Put **that** config password in the same note, then `shred -u` the
 >    plaintext config.
 >

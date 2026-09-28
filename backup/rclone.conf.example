@@ -9,7 +9,11 @@
 # Encrypt the config itself so the obscured passwords are not sitting in plain
 # text on the VM:
 #
-#     rclone config password
+#     rclone config encryption set
+#
+# NOT `rclone config password` - despite the name, that command *updates the
+# password of an existing remote* and will not encrypt anything.
+# `rclone config encryption check` verifies the result.
 #
 # Layout: two storage backends, each wrapped in its own crypt layer.
 # The crypt layer means the provider stores ciphertext — Google and MEGA never

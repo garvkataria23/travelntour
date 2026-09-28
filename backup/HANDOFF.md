@@ -252,7 +252,7 @@ identical to the repo.
   `sudo shred -u /root/flyconnect-crypt-keys.txt`.** This is the single most
   urgent item in this document. Until it happens there is exactly one copy of
   the keys, on a disk that could be lost with the VM.
-- **Then** `sudo rclone config password`, and store *that* password in the same
+- **Then** `sudo rclone config encryption set`, and store *that* password in the same
   note before shredding anything else. The order is: keys → config password →
   shred. Encrypting the config first leaves the keys recoverable from nowhere.
 - **MEGA:** sign in through the browser once first. rclone cannot bootstrap the
