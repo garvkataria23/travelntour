@@ -341,7 +341,9 @@ export default function SettingsPage() {
           <p className="text-base text-[#596782]">Manage your account and business details.</p>
         </div>
 
-        {settings.error ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{settings.error}</p> : null}
+        {settings.error && !settings.error.toLowerCase().includes("token") ? (
+          <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{settings.error}</p>
+        ) : null}
         {actionError ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{actionError}</p> : null}
         {notice ? <p className="rounded-lg bg-[#e9fbf1] px-4 py-3 text-sm font-medium text-[#00a451]">{notice}</p> : null}
 

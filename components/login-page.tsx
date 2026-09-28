@@ -83,16 +83,26 @@ export function LoginPage() {
       // 1. Check if user is using legacy/demo bypass
       if (userId.trim() === EASY_ID && password === EASY_PASSWORD) {
         try {
-          const session = await api<{ accessToken: string; refreshToken: string; user: { id: string; name: string; email: string; role: string } }>(
-            "/auth/login",
-            { method: "POST", body: { email: userId.trim(), password }, auth: false }
+          const user = await signInWithEmail("demo@flyconnect.app", "aura-demo-password-2026");
+          const profile = await getOrCreateUserProfile({
+            uid: user.uid,
+            email: user.email,
+            displayName: "Demo Agent",
+          });
+          const token = await user.getIdToken();
+          setSession(
+            {
+              accessToken: token,
+              refreshToken: user.refreshToken || token,
+              user: { id: profile.uid, name: profile.name, email: profile.email, role: profile.role },
+            },
+            remember
           );
-          setSession(session, remember);
           setMessage("Demo login successful — signing you in.");
           setTimeout(() => router.push("/dashboard"), 400);
           return;
         } catch {
-          // Fallback if local backend is down: create valid local session
+          // Fallback if offline: create local session
           setSession(
             {
               accessToken: "demo_token_flyconnect",
