@@ -40,11 +40,24 @@ export interface DriveStorageQuota {
   limit: number;
   usage: number;
   usageInDrive?: number;
+  usageInGmail?: number;
+  usageInPhotos?: number;
   percent: number;
   formattedUsed: string;
   formattedTotal: string;
   formattedFree: string;
+  planName?: string;
 }
+
+export const formatStorageBytes = (bytes: number): string => {
+  if (bytes >= 1024 * 1024 * 1024 * 1024) {
+    return (bytes / (1024 * 1024 * 1024 * 1024)).toFixed(2) + " TB";
+  }
+  if (bytes >= 1024 * 1024 * 1024) {
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+  }
+  return (bytes / (1024 * 1024)).toFixed(0) + " MB";
+};
 
 /**
  * Fetch Google Drive storage quota using the user's OAuth access token.
@@ -64,27 +77,20 @@ export async function fetchDriveQuota(accessToken: string): Promise<DriveStorage
     const sq = data.storageQuota;
     if (!sq) return null;
 
-    const limit = sq.limit ? Number(sq.limit) : 15 * 1024 * 1024 * 1024;
+    const limit = sq.limit ? Number(sq.limit) : 5 * 1024 * 1024 * 1024 * 1024;
     const usage = sq.usage ? Number(sq.usage) : 0;
     const usageInDrive = sq.usageInDrive ? Number(sq.usageInDrive) : 0;
     const free = Math.max(0, limit - usage);
-    const percent = limit > 0 ? Math.min(100, Math.round((usage / limit) * 100)) : 0;
-
-    const formatBytes = (bytes: number) => {
-      if (bytes >= 1024 * 1024 * 1024) {
-        return (bytes / (1024 * 1024 * 1024)).toFixed(1) + " GB";
-      }
-      return (bytes / (1024 * 1024)).toFixed(0) + " MB";
-    };
+    const percent = limit > 0 ? Math.min(100, Number(((usage / limit) * 100).toFixed(1))) : 0;
 
     return {
       limit,
       usage,
       usageInDrive,
       percent,
-      formattedUsed: formatBytes(usage),
-      formattedTotal: formatBytes(limit),
-      formattedFree: formatBytes(free),
+      formattedUsed: formatStorageBytes(usage),
+      formattedTotal: formatStorageBytes(limit),
+      formattedFree: formatStorageBytes(free),
     };
   } catch (err) {
     console.error("Failed to fetch drive quota:", err);

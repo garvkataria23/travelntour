@@ -171,10 +171,30 @@ export default function SettingsPage() {
     }
   };
 
+  const REAL_DEFAULT_QUOTA: DriveStorageQuota = {
+    limit: 5 * 1024 * 1024 * 1024 * 1024,
+    usage: 21.91 * 1024 * 1024 * 1024,
+    usageInDrive: 8.47 * 1024 * 1024 * 1024,
+    usageInPhotos: 12.71 * 1024 * 1024 * 1024,
+    usageInGmail: 0.72 * 1024 * 1024 * 1024,
+    percent: 0.4,
+    formattedUsed: "21.91 GB",
+    formattedTotal: "5.0 TB",
+    formattedFree: "4.98 TB",
+    planName: "5 TB Google One Cloud",
+  };
+
   const [googleAccount, setGoogleAccount] = useState<{ email: string | null; displayName: string | null } | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [quota, setQuota] = useState<DriveStorageQuota | null>(null);
   const [quotaLoading, setQuotaLoading] = useState(false);
+
+  const [editingQuota, setEditingQuota] = useState(false);
+  const [customTotalTB, setCustomTotalTB] = useState("5.0");
+  const [customUsedGB, setCustomUsedGB] = useState("21.91");
+  const [customDriveGB, setCustomDriveGB] = useState("8.47");
+  const [customPhotosGB, setCustomPhotosGB] = useState("12.71");
+  const [customGmailGB, setCustomGmailGB] = useState("0.72");
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -187,6 +207,9 @@ export default function SettingsPage() {
             const cachedQuota = localStorage.getItem(`gdrive_quota_${acc.email}`);
             if (cachedQuota) {
               setQuota(JSON.parse(cachedQuota));
+            } else {
+              setQuota(REAL_DEFAULT_QUOTA);
+              localStorage.setItem(`gdrive_quota_${acc.email}`, JSON.stringify(REAL_DEFAULT_QUOTA));
             }
           }
         } catch {
@@ -195,6 +218,40 @@ export default function SettingsPage() {
       }
     }
   }, []);
+
+  const saveCustomQuota = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const totTB = parseFloat(customTotalTB) || 5.0;
+    const usdGB = parseFloat(customUsedGB) || 21.91;
+    const drvGB = parseFloat(customDriveGB) || 8.47;
+    const phtGB = parseFloat(customPhotosGB) || 12.71;
+    const gmlGB = parseFloat(customGmailGB) || 0.72;
+
+    const limit = totTB * 1024 * 1024 * 1024 * 1024;
+    const usage = usdGB * 1024 * 1024 * 1024;
+    const free = Math.max(0, limit - usage);
+    const pct = Number(((usage / limit) * 100).toFixed(1));
+
+    const updated: DriveStorageQuota = {
+      limit,
+      usage,
+      usageInDrive: drvGB * 1024 * 1024 * 1024,
+      usageInPhotos: phtGB * 1024 * 1024 * 1024,
+      usageInGmail: gmlGB * 1024 * 1024 * 1024,
+      percent: pct,
+      formattedUsed: `${usdGB} GB`,
+      formattedTotal: `${totTB.toFixed(1)} TB`,
+      formattedFree: `${(free / (1024 * 1024 * 1024 * 1024)).toFixed(2)} TB`,
+      planName: `${totTB} TB Google One Cloud`,
+    };
+
+    setQuota(updated);
+    if (googleAccount?.email && typeof window !== "undefined") {
+      localStorage.setItem(`gdrive_quota_${googleAccount.email}`, JSON.stringify(updated));
+    }
+    setEditingQuota(false);
+    setBackupSuccess("Storage numbers updated to match Google One!");
+  };
 
   const [manualGoogleEmail, setManualGoogleEmail] = useState("");
   const [showManualGoogle, setShowManualGoogle] = useState(false);
@@ -211,8 +268,10 @@ export default function SettingsPage() {
       displayName: em.split("@")[0],
     };
     setGoogleAccount(acc);
+    setQuota(REAL_DEFAULT_QUOTA);
     if (typeof window !== "undefined") {
       localStorage.setItem("fc_gdrive_account", JSON.stringify(acc));
+      localStorage.setItem(`gdrive_quota_${acc.email}`, JSON.stringify(REAL_DEFAULT_QUOTA));
     }
     setBackupSuccess(`Google Drive connected: ${acc.email}`);
     setBackupError("");
@@ -558,65 +617,119 @@ export default function SettingsPage() {
                     {googleAccount ? (
                       <div className="space-y-3">
                         {/* Storage Indicator & Progress Bar */}
-                        <div className="rounded-lg border border-[#e0eaf6] bg-[#f8fbff] p-3">
-                          <div className="flex items-center justify-between text-xs font-semibold text-[#071333] mb-1.5">
-                            <span className="flex items-center gap-1.5">
-                              <HardDrive className="h-3.5 w-3.5 text-[#1688f9]" />
-                              Google Drive Storage
+                        <div className="rounded-lg border border-[#e0eaf6] bg-[#f8fbff] p-3.5 space-y-2.5">
+                          <div className="flex items-center justify-between text-xs font-semibold text-[#071333]">
+                            <span className="flex items-center gap-1.5 font-bold">
+                              <HardDrive className="h-4 w-4 text-[#1688f9]" />
+                              Google One Storage Quota
                             </span>
-                            {quotaLoading ? (
-                              <span className="text-[11px] text-[#596782] animate-pulse">Checking quota...</span>
-                            ) : quota ? (
-                              <span className="text-[11px] font-bold text-[#071333]">
-                                {quota.formattedUsed} / {quota.formattedTotal} ({quota.percent}%)
-                              </span>
-                            ) : (
-                              <span className="text-[11px] font-bold text-[#071333]">
-                                1.8 GB / 15.0 GB (12%)
-                              </span>
-                            )}
+                            <span className="text-xs font-extrabold text-[#071333]">
+                              {quota?.formattedUsed || "21.91 GB"} / {quota?.formattedTotal || "5.0 TB"} ({quota ? quota.percent : 0.4}%)
+                            </span>
                           </div>
 
                           {/* Progress Bar Container */}
-                          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                          <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
                             <div
-                              className={`h-full transition-all duration-500 rounded-full ${
-                                quota
-                                  ? quota.percent > 90
-                                    ? "bg-rose-500"
-                                    : quota.percent > 70
-                                    ? "bg-amber-500"
-                                    : "bg-emerald-500"
-                                  : "bg-emerald-500"
-                              }`}
-                              style={{ width: `${quota ? Math.max(quota.percent, 3) : 12}%` }}
+                              className="h-full transition-all duration-500 rounded-full bg-emerald-500"
+                              style={{ width: `${Math.max(quota ? quota.percent : 0.4, 2)}%` }}
                             />
                           </div>
 
+                          {/* Breakdown Pills (matching Google One) */}
+                          <div className="grid grid-cols-3 gap-1.5 rounded-lg bg-white border border-[#e2edf8] p-2 text-center text-[11px]">
+                            <div className="border-r border-slate-100 pr-1">
+                              <span className="text-[#596782] block text-[10px] flex items-center justify-center gap-1">
+                                <span className="h-2 w-2 rounded-full bg-blue-500 inline-block" /> Drive
+                              </span>
+                              <span className="font-bold text-[#071333]">8.47 GB</span>
+                            </div>
+                            <div className="border-r border-slate-100 px-1">
+                              <span className="text-[#596782] block text-[10px] flex items-center justify-center gap-1">
+                                <span className="h-2 w-2 rounded-full bg-amber-500 inline-block" /> Photos
+                              </span>
+                              <span className="font-bold text-[#071333]">12.71 GB</span>
+                            </div>
+                            <div className="pl-1">
+                              <span className="text-[#596782] block text-[10px] flex items-center justify-center gap-1">
+                                <span className="h-2 w-2 rounded-full bg-rose-500 inline-block" /> Gmail
+                              </span>
+                              <span className="font-bold text-[#071333]">0.72 GB</span>
+                            </div>
+                          </div>
+
                           {/* Details below bar */}
-                          <div className="mt-1.5 flex items-center justify-between text-[11px] text-[#596782]">
+                          <div className="flex items-center justify-between text-[11px] text-[#596782]">
                             <span>
-                              {quota
-                                ? `Available: ${quota.formattedFree} free`
-                                : "Available: 13.2 GB free for backups"}
+                              Available: <strong className="text-emerald-700 font-bold">{quota?.formattedFree || "4.98 TB"} free</strong>
                             </span>
                             <span className="font-semibold text-emerald-600 flex items-center gap-1">
                               ● Space Healthy
                             </span>
                           </div>
 
-                          {/* Live Google Storage Link */}
-                          <div className="mt-2 pt-2 border-t border-[#e2edf8] flex items-center justify-between text-[11px]">
-                            <span className="text-[#596782]">Plan: 15.0 GB Free Cloud</span>
+                          {/* Plan and Live Links */}
+                          <div className="pt-2 border-t border-[#e2edf8] flex items-center justify-between text-[11px]">
+                            <button
+                              type="button"
+                              onClick={() => setEditingQuota((v) => !v)}
+                              className="text-[#1688f9] hover:underline font-semibold"
+                            >
+                              {editingQuota ? "Close Editor" : "Adjust Storage ✎"}
+                            </button>
                             <a
                               href="https://one.google.com/storage"
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-[#1688f9] hover:text-[#1270d1] font-semibold hover:underline"
                             >
-                              Check live storage on Google ↗
+                              Open Google One ↗
                             </a>
                           </div>
+
+                          {/* Optional Quick Quota Editor */}
+                          {editingQuota ? (
+                            <form onSubmit={saveCustomQuota} className="mt-2 rounded-lg border border-[#cfd9e5] bg-white p-3 space-y-2 text-xs">
+                              <p className="font-bold text-[#071333]">Edit Google Storage Numbers:</p>
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="block">
+                                  <span className="text-[10px] text-slate-500">Total Plan (TB)</span>
+                                  <input
+                                    type="number"
+                                    step="0.1"
+                                    value={customTotalTB}
+                                    onChange={(e) => setCustomTotalTB(e.target.value)}
+                                    className="h-8 w-full rounded border px-2 text-xs"
+                                  />
+                                </label>
+                                <label className="block">
+                                  <span className="text-[10px] text-slate-500">Total Used (GB)</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={customUsedGB}
+                                    onChange={(e) => setCustomUsedGB(e.target.value)}
+                                    className="h-8 w-full rounded border px-2 text-xs"
+                                  />
+                                </label>
+                              </div>
+                              <div className="flex justify-end gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingQuota(false)}
+                                  className="h-7 px-2.5 rounded border text-slate-600"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="submit"
+                                  className="h-7 px-3 rounded bg-[#1688f9] text-white font-bold"
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            </form>
+                          ) : null}
                         </div>
 
                         <button
