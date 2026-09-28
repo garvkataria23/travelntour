@@ -32,9 +32,10 @@ export const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
 
-// Google Drive Provider (Non-sensitive: email, profile, openid to prevent unverified app warnings)
+// Google Drive Provider (drive.file scope allows saving agency backups in user's Google Drive)
 export const googleDriveProvider = new GoogleAuthProvider();
 googleDriveProvider.setCustomParameters({ prompt: "select_account" });
+googleDriveProvider.addScope("https://www.googleapis.com/auth/drive.file");
 
 export interface DriveStorageQuota {
   limit: number;

@@ -75,18 +75,18 @@ function createWindow() {
     },
   });
 
-  // Ensure Clean Chrome User-Agent without "Electron" for Google OAuth compatibility
-  const userAgent = mainWindow.webContents
-    .getUserAgent()
-    .replace(/Electron\/[0-9\.]+\s?/, "");
-  mainWindow.webContents.setUserAgent(userAgent);
+  const CHROME_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+
+  // Ensure 100% Genuine Chrome User-Agent for Google OAuth & Passkey/WebAuthn compatibility
+  mainWindow.webContents.setUserAgent(CHROME_USER_AGENT);
 
   // Load Cloud Production App
   mainWindow.loadURL(CLOUD_APP_URL);
 
   // Handle external links and auth popups
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    // Permit Firebase Auth Google Sign-In & handler popups
+    // Permit Firebase Auth Google Sign-In, Passkeys & OAuth handler popups
     if (
       url.includes("accounts.google.com") ||
       url.includes("firebaseapp.com/__/auth") ||
@@ -96,13 +96,17 @@ function createWindow() {
       return {
         action: "allow",
         overrideBrowserWindowOptions: {
-          width: 520,
-          height: 680,
+          width: 550,
+          height: 720,
+          minWidth: 460,
+          minHeight: 600,
           autoHideMenuBar: true,
+          title: "Sign in with Google",
           webPreferences: {
             nodeIntegration: false,
             contextIsolation: false,
             sandbox: false,
+            webSecurity: true,
           },
         },
       };
@@ -114,10 +118,7 @@ function createWindow() {
   });
 
   mainWindow.webContents.on("did-create-window", (childWindow) => {
-    const cleanUA = session.defaultSession
-      .getUserAgent()
-      .replace(/Electron\/[0-9\.]+\s?/, "");
-    childWindow.webContents.setUserAgent(cleanUA);
+    childWindow.webContents.setUserAgent(CHROME_USER_AGENT);
   });
 
   // Handle network failure gracefully
@@ -149,19 +150,14 @@ function createWindow() {
 app.whenReady().then(() => {
   app.setAppUserModelId("com.flyconnect.desktop");
 
-  const cleanUA = session.defaultSession
-    .getUserAgent()
-    .replace(/Electron\/[0-9\.]+\s?/, "");
-  session.defaultSession.setUserAgent(cleanUA);
-  app.userAgentFallback = cleanUA;
+  const CHROME_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+  session.defaultSession.setUserAgent(CHROME_USER_AGENT);
+  app.userAgentFallback = CHROME_USER_AGENT;
 
-  // Filter User-Agent in headers for OAuth requests
+  // Filter User-Agent in headers for OAuth and Passkey requests
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
-    if (details.requestHeaders["User-Agent"]) {
-      details.requestHeaders["User-Agent"] = details.requestHeaders[
-        "User-Agent"
-      ].replace(/Electron\/[0-9\.]+\s?/, "");
-    }
+    details.requestHeaders["User-Agent"] = CHROME_USER_AGENT;
     callback({ cancel: false, requestHeaders: details.requestHeaders });
   });
 

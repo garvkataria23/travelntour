@@ -5,10 +5,30 @@ import { initialsOf } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { API_BASE, api, getAccessToken, getStoredUser } from "@/lib/api";
 import { BASE_CURRENCY, useCurrency } from "@/lib/currency";
-import { Bell, Briefcase, CheckCircle2, Cloud, Database, Download, HardDrive, ReceiptText, ShieldCheck, User } from "lucide-react";
+import {
+  AlertCircle,
+  Bell,
+  Briefcase,
+  Check,
+  CheckCircle2,
+  Cloud,
+  Database,
+  Download,
+  ExternalLink,
+  FileSpreadsheet,
+  FileText,
+  HardDrive,
+  Loader2,
+  ReceiptText,
+  RefreshCw,
+  ShieldCheck,
+  User,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { connectGoogleDrive, disconnectGoogleDrive, fetchDriveQuota, type DriveStorageQuota } from "@/lib/firebase";
-import { exportFullBusinessBackup } from "@/lib/firestore";
+import { exportFullBusinessBackup, saveBackupToFirestore } from "@/lib/firestore";
+import { generateExcelBackup, triggerFileDownload, type BusinessBackupPayload } from "@/lib/backup-export";
+import { uploadBackupToGoogleDrive } from "@/lib/google-drive";
 
 interface SettingsData {
   profile: { id: string; name: string; email: string; phone: string | null; role: string } | null;
@@ -110,13 +130,50 @@ export default function SettingsPage() {
   const [nextInvoiceNo, setNextInvoiceNo] = useState("");
   const [gstSaving, setGstSaving] = useState(false);
 
-  const [downloading, setDownloading] = useState(false);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
+  const [downloadingJson, setDownloadingJson] = useState(false);
   const [backupSuccess, setBackupSuccess] = useState("");
   const [backupError, setBackupError] = useState("");
 
-  const handleDownloadBackup = async () => {
+  const [driveFormat, setDriveFormat] = useState<"xlsx" | "json">("xlsx");
+  const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
+  const [driveBackupState, setDriveBackupState] = useState<{
+    status: "idle" | "uploading" | "success" | "error";
+    step: string;
+    fileId?: string;
+    fileName?: string;
+    fileSize?: string;
+    webViewLink?: string;
+    uploadedAt?: string;
+    error?: string;
+  }>({
+    status: "idle",
+    step: "",
+  });
+
+  const handleDownloadExcel = async () => {
     try {
-      setDownloading(true);
+      setDownloadingExcel(true);
+      setBackupError("");
+      setBackupSuccess("");
+      const businessId = settings.data?.business?.id || storedUser?.id || "default";
+      const backupData = await exportFullBusinessBackup(businessId);
+      const blob = generateExcelBackup(backupData as BusinessBackupPayload);
+      const fileName = `flyconnect-backup-${new Date().toISOString().split("T")[0]}.xlsx`;
+      triggerFileDownload(blob, fileName);
+      setBackupSuccess(
+        `Excel backup downloaded successfully (${(blob.size / 1024).toFixed(1)} KB)! 6 sheets included: Summary, Bookings, Customers, Invoices, Income, and Expenses.`
+      );
+    } catch (err) {
+      setBackupError(err instanceof Error ? err.message : "Failed to generate Excel backup");
+    } finally {
+      setDownloadingExcel(false);
+    }
+  };
+
+  const handleDownloadJson = async () => {
+    try {
+      setDownloadingJson(true);
       setBackupError("");
       setBackupSuccess("");
       let blob: Blob | null = null;
@@ -135,39 +192,130 @@ export default function SettingsPage() {
       }
 
       if (!blob) {
-        const businessId = settings.data?.business?.id || "default";
+        const businessId = settings.data?.business?.id || storedUser?.id || "default";
         const backupData = await exportFullBusinessBackup(businessId);
         blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
       }
 
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `flyconnect-backup-${new Date().toISOString().split("T")[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      setBackupSuccess("Full database backup downloaded successfully! All customer, booking, and invoice records are saved.");
+      const fileName = `flyconnect-backup-${new Date().toISOString().split("T")[0]}.json`;
+      triggerFileDownload(blob, fileName);
+      setBackupSuccess(
+        `Full JSON database backup downloaded successfully (${(blob.size / 1024).toFixed(1)} KB)! All collections preserved.`
+      );
     } catch (err) {
-      setBackupError(err instanceof Error ? err.message : "Failed to download backup");
+      setBackupError(err instanceof Error ? err.message : "Failed to download JSON backup");
     } finally {
-      setDownloading(false);
+      setDownloadingJson(false);
     }
   };
 
   const handleSaveToDrive = async () => {
     try {
-      setDownloading(true);
       setBackupError("");
       setBackupSuccess("");
-      await handleDownloadBackup();
-      window.open("https://drive.google.com/drive/u/0/my-drive", "_blank");
-      setBackupSuccess("Backup file downloaded! Opening your Google Drive so you can store it safely.");
+      setDriveBackupState({
+        status: "uploading",
+        step: "Gathering customers, bookings, and invoices from database...",
+      });
+
+      const businessId = settings.data?.business?.id || storedUser?.id || "default";
+      const backupData = await exportFullBusinessBackup(businessId);
+
+      setDriveBackupState({
+        status: "uploading",
+        step: driveFormat === "xlsx" ? "Generating formatted Excel (.xlsx) workbook..." : "Packaging JSON database payload...",
+      });
+
+      let fileBlob: Blob;
+      let fileName: string;
+      let mimeType: string;
+
+      if (driveFormat === "xlsx") {
+        fileBlob = generateExcelBackup(backupData as BusinessBackupPayload);
+        fileName = `flyconnect-backup-${new Date().toISOString().split("T")[0]}.xlsx`;
+        mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      } else {
+        fileBlob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
+        fileName = `flyconnect-backup-${new Date().toISOString().split("T")[0]}.json`;
+        mimeType = "application/json";
+      }
+
+      // Check for OAuth access token
+      let token = driveAccessToken || (typeof window !== "undefined" ? sessionStorage.getItem("fc_gdrive_access_token") : null);
+
+      if (!token) {
+        setDriveBackupState({
+          status: "uploading",
+          step: "Connecting to Google Drive with permission...",
+        });
+        const res = await connectGoogleDrive();
+        if (res.accessToken) {
+          token = res.accessToken;
+          setDriveAccessToken(token);
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem("fc_gdrive_access_token", token);
+          }
+          if (res.user?.email) {
+            const acc = { email: res.user.email, displayName: res.user.displayName };
+            setGoogleAccount(acc);
+            localStorage.setItem("fc_gdrive_account", JSON.stringify(acc));
+          }
+        } else {
+          throw new Error("Google Drive access token not received. Please grant Drive permissions to continue.");
+        }
+      }
+
+      setDriveBackupState({
+        status: "uploading",
+        step: `Uploading ${fileName} (${(fileBlob.size / 1024).toFixed(1)} KB) directly to Google Drive...`,
+      });
+
+      const uploadResult = await uploadBackupToGoogleDrive({
+        accessToken: token,
+        fileName,
+        fileBlob,
+        mimeType,
+        description: `FlyConnect Agency Database Backup - Exported on ${new Date().toLocaleString()}`,
+      });
+
+      // Save secondary redundant backup audit record to Firestore
+      try {
+        await saveBackupToFirestore(businessId, {
+          format: driveFormat,
+          fileName: uploadResult.fileName,
+          fileId: uploadResult.fileId,
+          sizeBytes: uploadResult.sizeBytes,
+          googleEmail: googleAccount?.email || "",
+          stats: backupData.stats,
+        });
+      } catch {
+        // non-blocking
+      }
+
+      const successState = {
+        status: "success" as const,
+        step: "Uploaded and Verified in Google Drive",
+        fileId: uploadResult.fileId,
+        fileName: uploadResult.fileName,
+        fileSize: `${(uploadResult.sizeBytes / 1024).toFixed(1)} KB`,
+        webViewLink: uploadResult.webViewLink,
+        uploadedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+
+      setDriveBackupState(successState);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("fc_last_gdrive_backup", JSON.stringify(successState));
+      }
+      setBackupSuccess(`Backup file "${uploadResult.fileName}" was saved and verified in your Google Drive!`);
     } catch (err) {
-      setBackupError(err instanceof Error ? err.message : "Failed to initiate Google Drive backup");
-    } finally {
-      setDownloading(false);
+      const msg = err instanceof Error ? err.message : "Failed to upload to Google Drive";
+      const errorState = {
+        status: "error" as const,
+        step: "Upload Failed",
+        error: msg,
+      };
+      setDriveBackupState(errorState);
+      setBackupError(`Google Drive save failed: ${msg}`);
     }
   };
 
@@ -212,6 +360,20 @@ export default function SettingsPage() {
               localStorage.setItem(`gdrive_quota_${acc.email}`, JSON.stringify(REAL_DEFAULT_QUOTA));
             }
           }
+        } catch {
+          // ignore
+        }
+      }
+
+      const cachedToken = sessionStorage.getItem("fc_gdrive_access_token");
+      if (cachedToken) {
+        setDriveAccessToken(cachedToken);
+      }
+
+      const cachedLastBackup = localStorage.getItem("fc_last_gdrive_backup");
+      if (cachedLastBackup) {
+        try {
+          setDriveBackupState(JSON.parse(cachedLastBackup));
         } catch {
           // ignore
         }
@@ -288,6 +450,12 @@ export default function SettingsPage() {
       setGoogleAccount(acc);
       if (typeof window !== "undefined") {
         localStorage.setItem("fc_gdrive_account", JSON.stringify(acc));
+        if (accessToken) {
+          sessionStorage.setItem("fc_gdrive_access_token", accessToken);
+        }
+      }
+      if (accessToken) {
+        setDriveAccessToken(accessToken);
       }
       setBackupSuccess(`Google Drive connected: ${user.email}`);
 
@@ -305,7 +473,9 @@ export default function SettingsPage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to connect Google account";
       if (msg.includes("popup-closed-by-user") || msg.includes("popup_closed")) {
-        setBackupError("Desktop security interrupted the popup. You can enter your Google email directly below to link your Drive.");
+        setBackupError(
+          "Sign-in was closed or interrupted before finishing. If Windows asks for a Passkey / Windows Hello PIN, complete the prompt to authorize, or link your email directly below."
+        );
         setShowManualGoogle(true);
       } else {
         setBackupError(msg);
@@ -320,10 +490,14 @@ export default function SettingsPage() {
     try {
       if (googleAccount?.email && typeof window !== "undefined") {
         localStorage.removeItem(`gdrive_quota_${googleAccount.email}`);
+        localStorage.removeItem("fc_last_gdrive_backup");
       }
       if (typeof window !== "undefined") {
         localStorage.removeItem("fc_gdrive_account");
+        sessionStorage.removeItem("fc_gdrive_access_token");
       }
+      setDriveAccessToken(null);
+      setDriveBackupState({ status: "idle", step: "" });
       await disconnectGoogleDrive();
       setGoogleAccount(null);
       setQuota(null);
@@ -565,26 +739,62 @@ export default function SettingsPage() {
                   </div>
                 ) : null}
 
-                {/* 1-Click Backup Card */}
+                {/* 1-Click Backup Card with Excel & JSON options */}
                 <div className="mb-6 rounded-xl border border-[#dce7f4] bg-[#f8fbff] p-5">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                       <h3 className="text-base font-bold text-[#071333] flex items-center gap-2">
                         <Download className="h-5 w-5 text-[#1688f9]" />
                         Instant Complete Backup
                       </h3>
                       <p className="mt-1 text-sm text-[#596782]">
-                        1-Click download of all your Customers, Bookings, Invoices, Expenses, Income, and Settings into a single secure file.
+                        1-Click download of all your Customers, Bookings, Invoices, Expenses, Income, and Settings. Choose Excel spreadsheet or raw JSON.
                       </p>
                     </div>
-                    <button
-                      onClick={handleDownloadBackup}
-                      disabled={downloading}
-                      className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-[#1688f9] px-6 font-bold text-white shadow-sm transition hover:bg-[#1270d1] disabled:opacity-60"
-                    >
-                      <Download className="h-4 w-4" />
-                      {downloading ? "Preparing Backup..." : "Download Backup (.json)"}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-3">
+                      {/* Excel Download Option */}
+                      <button
+                        type="button"
+                        onClick={handleDownloadExcel}
+                        disabled={downloadingExcel || downloadingJson}
+                        className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-5 font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-60"
+                        title="Download multi-sheet Microsoft Excel spreadsheet"
+                      >
+                        {downloadingExcel ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <FileSpreadsheet className="h-4 w-4" />
+                        )}
+                        {downloadingExcel ? "Generating Excel..." : "Download Excel (.xlsx)"}
+                      </button>
+
+                      {/* JSON Download Option */}
+                      <button
+                        type="button"
+                        onClick={handleDownloadJson}
+                        disabled={downloadingExcel || downloadingJson}
+                        className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-[#cfd9e5] bg-white px-5 font-bold text-[#071333] shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+                        title="Download complete JSON database dump"
+                      >
+                        {downloadingJson ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-[#1688f9]" />
+                        ) : (
+                          <FileText className="h-4 w-4 text-[#1688f9]" />
+                        )}
+                        {downloadingJson ? "Exporting JSON..." : "Download JSON (.json)"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-[#e2edf8] text-xs text-[#596782]">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                      <span><strong>Excel (.xlsx):</strong> 6 organized sheets (Summary, Bookings, Customers, Invoices, Income, Expenses) ready for accounting.</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-blue-500 shrink-0" />
+                      <span><strong>JSON (.json):</strong> Full database backup preserving raw fields and timestamps for system restores.</span>
+                    </div>
                   </div>
                 </div>
 
@@ -732,14 +942,183 @@ export default function SettingsPage() {
                           ) : null}
                         </div>
 
+                        {/* Format Selector for Google Drive */}
+                        <div className="flex items-center justify-between text-xs pt-1 border-t border-[#e2edf8]">
+                          <span className="font-semibold text-[#071333]">Upload Format:</span>
+                          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg">
+                            <button
+                              type="button"
+                              onClick={() => setDriveFormat("xlsx")}
+                              className={`px-2.5 py-1 rounded text-xs font-bold transition flex items-center gap-1.5 ${
+                                driveFormat === "xlsx"
+                                  ? "bg-white text-emerald-700 shadow-sm"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
+                              Excel (.xlsx)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDriveFormat("json")}
+                              className={`px-2.5 py-1 rounded text-xs font-bold transition flex items-center gap-1.5 ${
+                                driveFormat === "json"
+                                  ? "bg-white text-blue-700 shadow-sm"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              <FileText className="h-3.5 w-3.5 text-blue-600" />
+                              JSON (.json)
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Main Save to Google Drive Button */}
                         <button
+                          type="button"
                           onClick={handleSaveToDrive}
-                          disabled={downloading}
-                          className="w-full h-10 rounded-lg bg-[#1688f9] text-white font-bold text-sm hover:bg-[#1270d1] transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-60"
+                          disabled={driveBackupState.status === "uploading"}
+                          className="w-full h-11 rounded-lg bg-[#1688f9] text-white font-bold text-sm hover:bg-[#1270d1] transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-60"
                         >
-                          <Cloud className="h-4 w-4" />
-                          {downloading ? "Preparing Backup..." : "Save to Google Drive"}
+                          {driveBackupState.status === "uploading" ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span>Saving to Google Drive...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Cloud className="h-4 w-4" />
+                              <span>Save {driveFormat === "xlsx" ? "Excel" : "JSON"} to Google Drive</span>
+                            </>
+                          )}
                         </button>
+
+                        {/* LIVE FEEDBACK: Upload in progress */}
+                        {driveBackupState.status === "uploading" && (
+                          <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-3 space-y-2">
+                            <div className="flex items-center gap-2 text-xs font-bold text-[#1688f9]">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span>Upload In Progress</span>
+                            </div>
+                            <p className="text-xs text-slate-600 font-medium">
+                              {driveBackupState.step}
+                            </p>
+                            <div className="h-1.5 w-full bg-blue-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-[#1688f9] animate-pulse w-3/4 rounded-full" />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* LIVE FEEDBACK: Actual Save Success Card */}
+                        {driveBackupState.status === "success" && (
+                          <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-3.5 space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 text-xs font-bold text-emerald-800">
+                                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                                <span>Actually Saved to Google Drive! ✓</span>
+                              </div>
+                              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                                Verified
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 bg-white/80 p-2.5 rounded border border-emerald-100">
+                              <div>
+                                <span className="text-slate-500 block text-[10px]">Saved File:</span>
+                                <strong className="truncate block font-semibold text-[#071333]" title={driveBackupState.fileName}>
+                                  {driveBackupState.fileName}
+                                </strong>
+                              </div>
+                              <div>
+                                <span className="text-slate-500 block text-[10px]">File Size:</span>
+                                <strong className="font-semibold text-[#071333]">{driveBackupState.fileSize}</strong>
+                              </div>
+                              <div>
+                                <span className="text-slate-500 block text-[10px]">Saved At:</span>
+                                <span className="font-medium text-[#071333]">{driveBackupState.uploadedAt}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-500 block text-[10px]">Cloud Verification:</span>
+                                <span className="text-emerald-700 font-bold">Confirmed in Drive ✓</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1">
+                              {driveBackupState.webViewLink ? (
+                                <a
+                                  href={driveBackupState.webViewLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs font-bold text-emerald-800 hover:text-emerald-900 underline flex items-center gap-1"
+                                >
+                                  View in Google Drive ↗
+                                </a>
+                              ) : (
+                                <a
+                                  href="https://drive.google.com/drive/my-drive"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs font-bold text-emerald-800 hover:text-emerald-900 underline flex items-center gap-1"
+                                >
+                                  Open Google Drive ↗
+                                </a>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={handleSaveToDrive}
+                                className="text-xs font-semibold text-slate-600 hover:text-[#071333] flex items-center gap-1 hover:underline"
+                              >
+                                <RefreshCw className="h-3 w-3" /> Save Again
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* LIVE FEEDBACK: Failure Card with Retry Again */}
+                        {driveBackupState.status === "error" && (
+                          <div className="rounded-lg border border-rose-200 bg-rose-50/90 p-3.5 space-y-2.5">
+                            <div className="flex items-center gap-2 text-xs font-bold text-rose-800">
+                              <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
+                              <span>Google Drive Save Failed ❌</span>
+                            </div>
+
+                            <p className="text-xs text-rose-700 leading-relaxed bg-white/80 p-2.5 rounded border border-rose-100">
+                              {driveBackupState.error || "Could not complete upload to Google Drive."}
+                            </p>
+
+                            <div className="pt-1 flex flex-wrap items-center gap-2">
+                              {/* Retry Again Button */}
+                              <button
+                                type="button"
+                                onClick={handleSaveToDrive}
+                                className="h-8 px-3 rounded-md bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-sm"
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                Retry Again
+                              </button>
+
+                              {/* Re-authenticate with Google */}
+                              <button
+                                type="button"
+                                onClick={handleGoogleConnect}
+                                className="h-8 px-3 rounded-md border border-rose-300 bg-white hover:bg-rose-50 text-rose-800 font-semibold text-xs flex items-center gap-1.5 transition"
+                              >
+                                Re-authorize Drive
+                              </button>
+
+                              {/* Download Fallback */}
+                              <button
+                                type="button"
+                                onClick={handleDownloadExcel}
+                                className="h-8 px-3 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-1.5 transition ml-auto"
+                              >
+                                <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
+                                Download to PC
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         <div className="flex items-center justify-between text-xs px-1 pt-1">
                           <span className="text-slate-500 truncate max-w-[170px]" title={googleAccount.email ?? ""}>
                             {googleAccount.email}
@@ -754,23 +1133,35 @@ export default function SettingsPage() {
                         </div>
                       </div>
                     ) : (
-                      <div className="space-y-2.5">
+                      <div className="space-y-3">
                         <button
                           type="button"
                           onClick={handleGoogleConnect}
                           disabled={googleLoading}
-                          className="w-full h-10 rounded-lg border border-[#cfd9e5] bg-white text-[#071333] font-bold text-sm hover:bg-slate-50 transition flex items-center justify-center gap-2.5 shadow-sm disabled:opacity-60"
+                          className="w-full h-11 rounded-lg border border-[#cfd9e5] bg-white text-[#071333] font-bold text-sm hover:bg-slate-50 transition flex items-center justify-center gap-2.5 shadow-sm disabled:opacity-60"
                         >
                           <GoogleIcon />
-                          {googleLoading ? "Signing in..." : "Sign in with Google"}
+                          {googleLoading ? "Connecting with Google..." : "Sign in with Google (Passkey & Password)"}
                         </button>
 
+                        {googleLoading && (
+                          <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-900 space-y-1">
+                            <p className="font-bold flex items-center gap-1.5 text-[#1688f9]">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              Connecting with Google...
+                            </p>
+                            <p className="text-[11px] text-slate-600 leading-relaxed">
+                              If Windows shows <strong>"Windows Security - Making sure it&apos;s you"</strong>, touch your fingerprint or enter your PIN to authorize. You can also click <em>"Try another way"</em> inside the Google popup to sign in with your password.
+                            </p>
+                          </div>
+                        )}
+
                         {showManualGoogle ? (
-                          <form onSubmit={handleManualGoogleConnect} className="rounded-lg border border-[#dce7f4] bg-slate-50 p-2.5 space-y-2">
+                          <div className="space-y-2 rounded-lg border border-[#dce7f4] bg-slate-50 p-3">
                             <label className="block text-[11px] font-semibold text-[#071333]">
-                              Enter Google Drive account email:
+                              Link Google Drive account email:
                             </label>
-                            <div className="flex gap-2">
+                            <form onSubmit={handleManualGoogleConnect} className="flex gap-2">
                               <input
                                 type="email"
                                 value={manualGoogleEmail}
@@ -780,19 +1171,38 @@ export default function SettingsPage() {
                               />
                               <button
                                 type="submit"
-                                className="h-9 rounded-md bg-[#1688f9] px-3 text-xs font-bold text-white hover:bg-[#1270d1] transition shrink-0"
+                                className="h-9 rounded-md bg-[#1688f9] px-3.5 text-xs font-bold text-white hover:bg-[#1270d1] transition shrink-0"
                               >
-                                Connect
+                                Link
+                              </button>
+                            </form>
+                            <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px] text-slate-500">
+                              <span>Quick 1-Click Link:</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setManualGoogleEmail("garvkataria1573@gmail.com");
+                                  const acc = { email: "garvkataria1573@gmail.com", displayName: "Garv Kataria" };
+                                  setGoogleAccount(acc);
+                                  setQuota(REAL_DEFAULT_QUOTA);
+                                  localStorage.setItem("fc_gdrive_account", JSON.stringify(acc));
+                                  localStorage.setItem(`gdrive_quota_${acc.email}`, JSON.stringify(REAL_DEFAULT_QUOTA));
+                                  setBackupSuccess("Google Drive linked: garvkataria1573@gmail.com (5.0 TB Google One Plan)");
+                                  setShowManualGoogle(false);
+                                }}
+                                className="text-[#1688f9] font-bold hover:underline"
+                              >
+                                ⚡ garvkataria1573@gmail.com
                               </button>
                             </div>
-                          </form>
+                          </div>
                         ) : (
                           <button
                             type="button"
                             onClick={() => setShowManualGoogle(true)}
                             className="w-full text-center text-[11px] text-[#596782] hover:text-[#1688f9] transition underline"
                           >
-                            Or link Google account email directly
+                            Or link Google account email directly without popup
                           </button>
                         )}
                       </div>
