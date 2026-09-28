@@ -226,8 +226,8 @@ export function LoginPage() {
               </h2>
               <p className="mt-1 text-[15px] leading-relaxed text-[#667389]">
                 {mode === "login"
-                  ? "Login with Firebase to manage bookings, customers, and travel operations."
-                  : "Start managing your travel agency bookings and customers with Cloud Firestore."}
+                  ? "Sign in to manage bookings, customers, and travel operations."
+                  : "Start managing your travel agency bookings, customers, and invoices."}
               </p>
             </div>
 
@@ -309,7 +309,7 @@ export function LoginPage() {
                 type="submit"
                 disabled={loading}
               >
-                {loading ? (mode === "login" ? "Logging in..." : "Creating Account...") : (mode === "login" ? "Login with Firebase" : "Sign Up with Firebase")}
+                {loading ? (mode === "login" ? "Logging in..." : "Creating Account...") : (mode === "login" ? "Login" : "Sign Up")}
                 <ArrowRight className="h-5 w-5" />
               </button>
             </form>
