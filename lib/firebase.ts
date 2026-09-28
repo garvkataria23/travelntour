@@ -32,10 +32,9 @@ export const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
 
-// Optional Drive Provider specifically for Drive Quota if requested in settings
+// Google Drive Provider (Non-sensitive: email, profile, openid to prevent unverified app warnings)
 export const googleDriveProvider = new GoogleAuthProvider();
 googleDriveProvider.setCustomParameters({ prompt: "select_account" });
-googleDriveProvider.addScope("https://www.googleapis.com/auth/drive.metadata.readonly");
 
 export interface DriveStorageQuota {
   limit: number;
