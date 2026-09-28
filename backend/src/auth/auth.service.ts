@@ -36,6 +36,16 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
+    // Public self-service signup hands every caller a brand new business plus an ADMIN
+    // account, which is a full compromise of an internal CRM. Staff are provisioned by an
+    // admin through POST /api/users instead. Signup only reopens if explicitly re-enabled.
+    if (this.config.get<string>('ALLOW_PUBLIC_REGISTRATION') !== 'true') {
+      throw new ForbiddenException({
+        message: 'Public signup is disabled. Ask an administrator to create your account.',
+        code: 'REGISTRATION_DISABLED',
+      });
+    }
+
     if (dto.phone && isValidPhone(dto.phone) && !dto.phone.startsWith('+')) {
       dto.phone = `+${dto.phone}`;
     }
