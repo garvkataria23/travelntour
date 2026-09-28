@@ -1,6 +1,6 @@
 {
   "name": "flyconnect-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "FlyConnect - BlueAura Tourism Desktop App",
   "main": "electron/main.js",
@@ -16,56 +16,15 @@
   "build": {
     "appId": "com.flyconnect.desktop",
     "productName": "FlyConnect",
-    "asar": false,
-    "compression": "normal",
+    "asar": true,
+    "compression": "maximum",
     "directories": {
       "output": "release",
       "buildResources": "build"
     },
     "files": [
-      "electron/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "../.next",
-        "to": "frontend/.next"
-      },
-      {
-        "from": "../node_modules",
-        "to": "frontend/node_modules"
-      },
-      {
-        "from": "../package.json",
-        "to": "frontend/package.json"
-      },
-      {
-        "from": "../next.config.js",
-        "to": "frontend/next.config.js"
-      },
-      {
-        "from": "../public",
-        "to": "frontend/public"
-      },
-      {
-        "from": "../.env.local",
-        "to": "frontend/.env.local"
-      },
-      {
-        "from": "../backend/dist",
-        "to": "backend/dist"
-      },
-      {
-        "from": "../backend/node_modules",
-        "to": "backend/node_modules"
-      },
-      {
-        "from": "../backend/.env",
-        "to": "backend/.env"
-      },
-      {
-        "from": "../backend/package.json",
-        "to": "backend/package.json"
-      }
+      "electron/**/*",
+      "build/**/*"
     ],
     "win": {
       "target": [
