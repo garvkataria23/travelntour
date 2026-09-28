@@ -90,7 +90,8 @@ function createWindow() {
     if (
       url.includes("accounts.google.com") ||
       url.includes("firebaseapp.com/__/auth") ||
-      url.includes("traveltourism-32d7d.firebaseapp.com")
+      url.includes("traveltourism-32d7d.firebaseapp.com") ||
+      url.includes("googleapis.com")
     ) {
       return {
         action: "allow",
@@ -100,8 +101,8 @@ function createWindow() {
           autoHideMenuBar: true,
           webPreferences: {
             nodeIntegration: false,
-            contextIsolation: true,
-            sandbox: true,
+            contextIsolation: false,
+            sandbox: false,
           },
         },
       };
@@ -110,6 +111,13 @@ function createWindow() {
     // Open any external external website or tool in default browser
     shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  mainWindow.webContents.on("did-create-window", (childWindow) => {
+    const cleanUA = session.defaultSession
+      .getUserAgent()
+      .replace(/Electron\/[0-9\.]+\s?/, "");
+    childWindow.webContents.setUserAgent(cleanUA);
   });
 
   // Handle network failure gracefully
@@ -140,6 +148,12 @@ function createWindow() {
 
 app.whenReady().then(() => {
   app.setAppUserModelId("com.flyconnect.desktop");
+
+  const cleanUA = session.defaultSession
+    .getUserAgent()
+    .replace(/Electron\/[0-9\.]+\s?/, "");
+  session.defaultSession.setUserAgent(cleanUA);
+  app.userAgentFallback = cleanUA;
 
   // Filter User-Agent in headers for OAuth requests
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {

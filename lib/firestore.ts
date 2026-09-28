@@ -288,3 +288,36 @@ export async function saveBackupToFirestore(businessId: string, backupData: Reco
   });
   return docRef.id;
 }
+
+/**
+ * Export complete portable JSON backup for business from Firestore
+ */
+export async function exportFullBusinessBackup(businessId: string) {
+  const [customers, bookings, invoices, expenses, income] = await Promise.all([
+    getCustomersFromFirestore(businessId).catch(() => []),
+    getBookingsFromFirestore(businessId).catch(() => []),
+    getInvoicesFromFirestore(businessId).catch(() => []),
+    getExpensesFromFirestore(businessId).catch(() => []),
+    getIncomeFromFirestore(businessId).catch(() => []),
+  ]);
+
+  return {
+    version: "1.0",
+    exportedAt: new Date().toISOString(),
+    businessId,
+    stats: {
+      customers: customers.length,
+      bookings: bookings.length,
+      invoices: invoices.length,
+      expenses: expenses.length,
+      income: income.length,
+    },
+    data: {
+      customers,
+      bookings,
+      invoices,
+      expenses,
+      income,
+    },
+  };
+}

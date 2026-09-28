@@ -106,6 +106,42 @@ export async function signInWithGoogle(provider: GoogleAuthProvider = googleProv
 }
 
 /**
+ * Secondary isolated Firebase Auth instance specifically for Google Drive OAuth
+ * so connecting Google Drive never overwrites or interferes with the user's primary login session!
+ */
+export function getGDriveAuth() {
+  const gdriveApp =
+    getApps().find((a) => a.name === "gdrive") ||
+    initializeApp(firebaseConfig, "gdrive");
+  return getAuth(gdriveApp);
+}
+
+/**
+ * Connect Google Drive via popup without modifying the primary application session.
+ */
+export async function connectGoogleDrive(): Promise<{ user: User; accessToken: string | null }> {
+  const gAuth = getGDriveAuth();
+  const result = await signInWithPopup(gAuth, googleDriveProvider);
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  return {
+    user: result.user,
+    accessToken: credential?.accessToken ?? null,
+  };
+}
+
+/**
+ * Disconnect Google Drive without logging the user out of FlyConnect.
+ */
+export async function disconnectGoogleDrive(): Promise<void> {
+  try {
+    const gAuth = getGDriveAuth();
+    await signOut(gAuth);
+  } catch {
+    // ignore
+  }
+}
+
+/**
  * Sign in using Email and Password.
  */
 export async function signInWithEmail(email: string, pass: string) {

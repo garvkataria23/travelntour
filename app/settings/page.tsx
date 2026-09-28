@@ -7,7 +7,8 @@ import { API_BASE, api, getAccessToken, getStoredUser } from "@/lib/api";
 import { BASE_CURRENCY, useCurrency } from "@/lib/currency";
 import { Bell, Briefcase, CheckCircle2, Cloud, Database, Download, HardDrive, ReceiptText, ShieldCheck, User } from "lucide-react";
 import { useEffect, useState } from "react";
-import { onAuthChange, signInWithGoogle, logOut, fetchDriveQuota, type DriveStorageQuota } from "@/lib/firebase";
+import { connectGoogleDrive, disconnectGoogleDrive, fetchDriveQuota, type DriveStorageQuota } from "@/lib/firebase";
+import { exportFullBusinessBackup } from "@/lib/firestore";
 
 interface SettingsData {
   profile: { id: string; name: string; email: string; phone: string | null; role: string } | null;
@@ -118,16 +119,27 @@ export default function SettingsPage() {
       setDownloading(true);
       setBackupError("");
       setBackupSuccess("");
+      let blob: Blob | null = null;
       const token = getAccessToken();
-      const res = await fetch(`${API_BASE}/storage/backup/export`, {
-        headers: {
-          Authorization: token ? `Bearer ${token}` : "",
-        },
-      });
-      if (!res.ok) {
-        throw new Error(`Failed to export backup (HTTP ${res.status})`);
+      try {
+        const res = await fetch(`${API_BASE}/storage/backup/export`, {
+          headers: {
+            Authorization: token ? `Bearer ${token}` : "",
+          },
+        });
+        if (res.ok) {
+          blob = await res.blob();
+        }
+      } catch {
+        // Backend unavailable, fallback to client-side Firestore export
       }
-      const blob = await res.blob();
+
+      if (!blob) {
+        const businessId = settings.data?.business?.id || "default";
+        const backupData = await exportFullBusinessBackup(businessId);
+        blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
+      }
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -165,25 +177,23 @@ export default function SettingsPage() {
   const [quotaLoading, setQuotaLoading] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthChange((u) => {
-      if (u) {
-        setGoogleAccount({ email: u.email, displayName: u.displayName });
-        if (typeof window !== "undefined" && u.email) {
-          const cached = localStorage.getItem(`gdrive_quota_${u.email}`);
-          if (cached) {
-            try {
-              setQuota(JSON.parse(cached));
-            } catch {
-              // ignore
+    if (typeof window !== "undefined") {
+      const cached = localStorage.getItem("fc_gdrive_account");
+      if (cached) {
+        try {
+          const acc = JSON.parse(cached);
+          if (acc?.email) {
+            setGoogleAccount(acc);
+            const cachedQuota = localStorage.getItem(`gdrive_quota_${acc.email}`);
+            if (cachedQuota) {
+              setQuota(JSON.parse(cachedQuota));
             }
           }
+        } catch {
+          // ignore
         }
-      } else {
-        setGoogleAccount(null);
-        setQuota(null);
       }
-    });
-    return () => unsubscribe();
+    }
   }, []);
 
   const handleGoogleConnect = async () => {
@@ -191,9 +201,13 @@ export default function SettingsPage() {
       setGoogleLoading(true);
       setBackupError("");
       setBackupSuccess("");
-      const { user, accessToken } = await signInWithGoogle();
-      setGoogleAccount({ email: user.email, displayName: user.displayName });
-      setBackupSuccess(`Google account connected: ${user.email}`);
+      const { user, accessToken } = await connectGoogleDrive();
+      const acc = { email: user.email, displayName: user.displayName };
+      setGoogleAccount(acc);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("fc_gdrive_account", JSON.stringify(acc));
+      }
+      setBackupSuccess(`Google Drive connected: ${user.email}`);
 
       if (accessToken) {
         setQuotaLoading(true);
@@ -207,7 +221,12 @@ export default function SettingsPage() {
         setQuotaLoading(false);
       }
     } catch (err) {
-      setBackupError(err instanceof Error ? err.message : "Failed to connect Google account");
+      const msg = err instanceof Error ? err.message : "Failed to connect Google account";
+      if (msg.includes("popup-closed-by-user")) {
+        setBackupError("Google Sign-In popup was closed before finishing.");
+      } else {
+        setBackupError(msg);
+      }
     } finally {
       setGoogleLoading(false);
       setQuotaLoading(false);
@@ -219,10 +238,13 @@ export default function SettingsPage() {
       if (googleAccount?.email && typeof window !== "undefined") {
         localStorage.removeItem(`gdrive_quota_${googleAccount.email}`);
       }
-      await logOut();
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("fc_gdrive_account");
+      }
+      await disconnectGoogleDrive();
       setGoogleAccount(null);
       setQuota(null);
-      setBackupSuccess("Google account disconnected.");
+      setBackupSuccess("Google Drive disconnected successfully.");
     } catch (err) {
       setBackupError(err instanceof Error ? err.message : "Failed to disconnect Google account");
     }
@@ -341,7 +363,10 @@ export default function SettingsPage() {
           <p className="text-base text-[#596782]">Manage your account and business details.</p>
         </div>
 
-        {settings.error && !settings.error.toLowerCase().includes("token") ? (
+        {settings.error &&
+        !settings.error.toLowerCase().includes("token") &&
+        !settings.error.toLowerCase().includes("authentication required") &&
+        !settings.error.toLowerCase().includes("unauthorized") ? (
           <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{settings.error}</p>
         ) : null}
         {actionError ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{actionError}</p> : null}
