@@ -3,7 +3,7 @@
 import { AppShell } from "@/components/dashboard/app-shell";
 import { initialsOf } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
-import { API_BASE, api, getAccessToken } from "@/lib/api";
+import { API_BASE, api, getAccessToken, getStoredUser } from "@/lib/api";
 import { BASE_CURRENCY, useCurrency } from "@/lib/currency";
 import { Bell, Briefcase, CheckCircle2, Cloud, Database, Download, HardDrive, ReceiptText, ShieldCheck, User } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -90,7 +90,8 @@ export default function SettingsPage() {
   const { options: currencyOptions } = useCurrency();
   const currencies = currencyOptions.length ? currencyOptions.map((option) => option.code) : FALLBACK_CURRENCIES;
 
-  const profile = settings.data?.profile;
+  const storedUser = typeof window !== "undefined" ? getStoredUser() : null;
+  const profile = settings.data?.profile || (storedUser ? { id: storedUser.id, name: storedUser.name, email: storedUser.email, phone: storedUser.phone ?? null, role: storedUser.role } : null);
   const biz = settings.data?.business;
   const prefs = settings.data?.preferences;
 

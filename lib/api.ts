@@ -167,6 +167,31 @@ let refreshPromise: Promise<boolean> | null = null;
 async function tryRefresh(): Promise<boolean> {
   const refreshToken = getRefreshToken();
   if (!refreshToken) return false;
+
+  // 1. Try Firebase Auth refresh first if authenticated via Firebase
+  if (typeof window !== "undefined") {
+    try {
+      const { auth } = await import("@/lib/firebase");
+      if (auth.currentUser) {
+        const newToken = await auth.currentUser.getIdToken(true);
+        if (newToken) {
+          const stored = getStoredUser();
+          if (stored) {
+            setSession({
+              accessToken: newToken,
+              refreshToken: auth.currentUser.refreshToken || newToken,
+              user: stored,
+            });
+            return true;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Try backend API refresh, but NEVER aggressively wipe session on error
   if (!refreshPromise) {
     refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
       method: "POST",
@@ -174,16 +199,15 @@ async function tryRefresh(): Promise<boolean> {
       body: JSON.stringify({ refreshToken }),
     })
       .then(async (res) => {
+        if (!res.ok) return false;
         const json = (await res.json()) as { success: boolean; data?: ApiSession };
-        if (!res.ok || !json.success || !json.data) {
-          clearSession();
+        if (!json.success || !json.data) {
           return false;
         }
         setSession(json.data);
         return true;
       })
       .catch(() => {
-        clearSession();
         return false;
       })
       .finally(() => {
