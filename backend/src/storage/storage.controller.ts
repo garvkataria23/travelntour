@@ -1,6 +1,7 @@
-import { Controller, ForbiddenException, Get, Post, Query } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
+import { Response } from 'express';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { StorageService } from './storage.service';
 
@@ -21,6 +22,25 @@ export class StorageController {
   @Get('usage')
   usage(@CurrentUser() user: AuthUser) {
     return this.storage.usage(user.businessId);
+  }
+
+  /**
+   * One-click full data export for tenant backup.
+   * Generates a complete JSON backup of all business data.
+   */
+  @Get('backup/export')
+  async exportBackup(@CurrentUser() user: AuthUser, @Res() res: Response) {
+    if (user.role !== Role.ADMIN && user.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException({ message: 'Only an administrator can export business backups' });
+    }
+
+    const backup = await this.storage.exportBusinessBackup(user.businessId);
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `flyconnect-backup-${dateStr}.json`;
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(JSON.stringify(backup, null, 2));
   }
 
   /**
@@ -51,3 +71,4 @@ export class StorageController {
     });
   }
 }
+

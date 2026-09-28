@@ -1,0 +1,494 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// This security rules file assumes the following data structures:
+//
+// Collection: businesses
+// Document ID: businessId
+// Fields:
+//   - id: string (required, 1-64 chars, immutable) - Unique business identifier matching document ID
+//   - name: string (required, 1-120 chars) - Business legal or trading name
+//   - email: string (optional, valid email, max 120 chars) - Official contact email
+//   - phone: string (optional, 5-30 chars) - Contact phone number
+//   - timezone: string (required, 1-64 chars) - Operational timezone (e.g. Asia/Kolkata)
+//   - currency: string (required, 2-10 chars) - Default currency code (e.g. AED, USD, INR)
+//   - createdAt: timestamp (required, immutable) - Document creation timestamp
+//   - updatedAt: timestamp (required) - Last modification timestamp
+//
+// Collection: users
+// Document ID: userId (matches Firebase Auth UID)
+// Fields:
+//   - uid: string (required, 1-128 chars, immutable) - Auth user ID matching document key
+//   - businessId: string (required, 1-64 chars, immutable) - Tenant business ID
+//   - email: string (required, valid email, max 120 chars) - User email address
+//   - name: string (required, 1-100 chars) - User display name
+//   - role: string (required, enum: 'ADMIN' | 'STAFF' | 'SUPER_ADMIN') - Access role
+//   - status: string (required, enum: 'ACTIVE' | 'INACTIVE') - User status
+//   - createdAt: timestamp (optional, immutable) - Account creation timestamp
+//   - updatedAt: timestamp (optional) - Modification timestamp
+//
+// Collection: customers
+// Document ID: customerId
+// Fields:
+//   - id: string (required, 1-64 chars, immutable) - Customer ID matching document key
+//   - businessId: string (required, 1-64 chars, immutable) - Tenant business ID
+//   - name: string (required, 1-120 chars) - Full name of the customer
+//   - phone: string (required, 5-30 chars) - Customer phone / WhatsApp contact
+//   - email: string (optional, valid email, max 120 chars) - Customer email
+//   - status: string (required, enum: 'ACTIVE' | 'INACTIVE') - Customer status
+//   - createdAt: timestamp (required, immutable) - Creation timestamp
+//   - updatedAt: timestamp (optional) - Modification timestamp
+//
+// Collection: bookings
+// Document ID: bookingId
+// Fields:
+//   - id: string (required, 1-64 chars, immutable) - Booking ID matching document key
+//   - businessId: string (required, 1-64 chars, immutable) - Tenant business ID
+//   - customerId: string (required, 1-64 chars) - Associated customer ID
+//   - pnr: string (required, 2-20 chars) - Passenger Name Record reservation code
+//   - airline: string (required, 1-100 chars) - Airline carrier name or IATA code
+//   - fromAirport: string (required, 2-10 chars) - Origin airport code
+//   - toAirport: string (required, 2-10 chars) - Destination airport code
+//   - departureDate: timestamp or ISO string (required) - Departure date and time
+//   - status: string (required, enum: 'CONFIRMED' | 'PENDING' | 'COMPLETED' | 'CANCELLED')
+//   - amount: number (required, >= 0, <= 100,000,000) - Total booking value
+//   - currency: string (required, 2-10 chars) - Currency code (e.g. AED)
+//   - createdAt: timestamp (required, immutable) - Creation timestamp
+//   - updatedAt: timestamp (optional) - Modification timestamp
+//
+// Collection: invoices
+// Document ID: invoiceId
+// Fields:
+//   - id: string (required, 1-64 chars, immutable) - Invoice ID matching document key
+//   - businessId: string (required, 1-64 chars, immutable) - Tenant business ID
+//   - bookingId: string (required, 1-64 chars, immutable) - Associated booking ID
+//   - invoiceNumber: string (required, 1-50 chars, immutable) - Invoice number
+//   - amount: number (required, >= 0, <= 100,000,000) - Total invoice amount
+//   - paymentStatus: string (required, enum: 'UNPAID' | 'PARTIAL' | 'PAID') - Payment status
+//   - createdAt: timestamp (required, immutable) - Issue timestamp
+//   - updatedAt: timestamp (optional) - Modification timestamp
+//
+// Collection: expenses
+// Document ID: expenseId
+// Fields:
+//   - id: string (required, 1-64 chars, immutable) - Expense ID matching document key
+//   - businessId: string (required, 1-64 chars, immutable) - Tenant business ID
+//   - title: string (required, 1-200 chars) - Title or description of expense
+//   - amount: number (required, > 0, <= 100,000,000) - Expense amount
+//   - category: string (required, enum: 'DIRECT' | 'OPERATING' or 1-50 chars)
+//   - date: timestamp or ISO string (required) - Incurred date
+//   - createdAt: timestamp (required, immutable) - Entry creation timestamp
+//   - updatedAt: timestamp (optional) - Modification timestamp
+//
+// Collection: income
+// Document ID: incomeId
+// Fields:
+//   - id: string (required, 1-64 chars, immutable) - Income ID matching document key
+//   - businessId: string (required, 1-64 chars, immutable) - Tenant business ID
+//   - title: string (required, 1-200 chars) - Income description or source
+//   - amount: number (required, > 0, <= 100,000,000) - Income amount received
+//   - category: string (required, enum: 'TICKET_SALE' | 'COMMISSION' | 'REFUND' | 'OTHER')
+//   - date: timestamp or ISO string (required) - Date received
+//   - createdAt: timestamp (required, immutable) - Entry creation timestamp
+//   - updatedAt: timestamp (optional) - Modification timestamp
+//
+// Collection: backups
+// Document ID: backupId
+// Fields:
+//   - id: string (required, 1-64 chars, immutable) - Backup ID matching document key
+//   - businessId: string (required, 1-64 chars, immutable) - Tenant business ID
+//   - exportedAt: timestamp (required, immutable) - Export execution timestamp
+//   - sizeBytes: int (required, >= 0) - Export archive size in bytes
+//   - status: string (required, enum: 'PENDING' | 'COMPLETED' | 'FAILED') - Export status
+//   - url: string (required, valid http/https URL, max 1024 chars) - Download URL
+//   - createdAt: timestamp (optional, immutable) - Entry creation timestamp
+//   - updatedAt: timestamp (optional) - Modification timestamp
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Global Default Deny
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    // Check if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if user is the direct owner by user ID
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Check for Super Admin privilege (custom claims or verified bootstrap email)
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        ('role' in request.auth.token && request.auth.token.role == 'SUPER_ADMIN') ||
+        (request.auth.token.email == 'vertexlabsx@gmail.com')
+      );
+    }
+
+    // Check if user belongs to the specified business tenant
+    function isTenantMember(businessId) {
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        ('businessId' in request.auth.token && request.auth.token.businessId == businessId) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId)
+      );
+    }
+
+    // Check if user is an ADMIN within the specified business tenant
+    function isTenantAdmin(businessId) {
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (
+          isTenantMember(businessId) && (
+            ('role' in request.auth.token && request.auth.token.role == 'ADMIN') ||
+            (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
+          )
+        )
+      );
+    }
+
+    // Validate required fields exist
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // Validate that document contains only allowed fields
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // Validate that specified immutable fields were not modified on update
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // Validate email string format
+    function isValidEmail(email) {
+      return email is string &&
+        email.size() <= 120 &&
+        email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+
+    // Validate optional email (if present, must be valid)
+    function isValidOptionalEmail(field) {
+      return !(field in request.resource.data) ||
+        (request.resource.data[field] is string && isValidEmail(request.resource.data[field]));
+    }
+
+    // Validate optional string length
+    function isValidOptionalString(field, minLen, maxLen) {
+      return !(field in request.resource.data) ||
+        (request.resource.data[field] is string &&
+         request.resource.data[field].size() >= minLen &&
+         request.resource.data[field].size() <= maxLen);
+    }
+
+    // Validate optional timestamp
+    function isValidOptionalTimestamp(field) {
+      return !(field in request.resource.data) || request.resource.data[field] is timestamp;
+    }
+
+    // Validate URL format (http or https)
+    function isValidUrl(url) {
+      return url is string &&
+        url.size() <= 1024 &&
+        (url.matches('^https://.*') || url.matches('^http://.*'));
+    }
+
+    // Validate flexible date field (Firestore timestamp or ISO date string)
+    function isValidDateField(val) {
+      return val is timestamp ||
+        (val is string && val.size() >= 10 && val.size() <= 35 && val.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}.*'));
+    }
+
+    // ===============================================================
+    // Domain Validators (Applied to both create and update)
+    // ===============================================================
+
+    function isValidBusiness(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'email', 'phone', 'timezone', 'currency', 'createdAt', 'updatedAt']) &&
+        hasRequiredFields(['id', 'name', 'timezone', 'currency', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        isValidOptionalEmail('email') &&
+        isValidOptionalString('phone', 5, 30) &&
+        data.timezone is string && data.timezone.size() >= 1 && data.timezone.size() <= 64 &&
+        data.currency is string && data.currency.size() >= 2 && data.currency.size() <= 10 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'businessId', 'email', 'name', 'role', 'status', 'createdAt', 'updatedAt']) &&
+        hasRequiredFields(['uid', 'businessId', 'email', 'name', 'role', 'status']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
+        data.email is string && isValidEmail(data.email) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.role in ['ADMIN', 'STAFF', 'SUPER_ADMIN'] &&
+        data.status in ['ACTIVE', 'INACTIVE'] &&
+        isValidOptionalTimestamp('createdAt') &&
+        isValidOptionalTimestamp('updatedAt');
+    }
+
+    function isValidCustomer(data) {
+      return hasOnlyAllowedFields(['id', 'businessId', 'name', 'phone', 'email', 'status', 'createdAt', 'updatedAt']) &&
+        hasRequiredFields(['id', 'businessId', 'name', 'phone', 'status', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 30 &&
+        isValidOptionalEmail('email') &&
+        data.status in ['ACTIVE', 'INACTIVE'] &&
+        data.createdAt is timestamp &&
+        isValidOptionalTimestamp('updatedAt');
+    }
+
+    function isValidBooking(data) {
+      return hasOnlyAllowedFields(['id', 'businessId', 'customerId', 'pnr', 'airline', 'fromAirport', 'toAirport', 'departureDate', 'status', 'amount', 'currency', 'createdAt', 'updatedAt']) &&
+        hasRequiredFields(['id', 'businessId', 'customerId', 'pnr', 'airline', 'fromAirport', 'toAirport', 'departureDate', 'status', 'amount', 'currency', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
+        data.customerId is string && data.customerId.size() >= 1 && data.customerId.size() <= 64 &&
+        data.pnr is string && data.pnr.size() >= 2 && data.pnr.size() <= 20 &&
+        data.airline is string && data.airline.size() >= 1 && data.airline.size() <= 100 &&
+        data.fromAirport is string && data.fromAirport.size() >= 2 && data.fromAirport.size() <= 10 &&
+        data.toAirport is string && data.toAirport.size() >= 2 && data.toAirport.size() <= 10 &&
+        isValidDateField(data.departureDate) &&
+        data.status in ['CONFIRMED', 'PENDING', 'COMPLETED', 'CANCELLED'] &&
+        data.amount is number && data.amount >= 0 && data.amount <= 100000000 &&
+        data.currency is string && data.currency.size() >= 2 && data.currency.size() <= 10 &&
+        data.createdAt is timestamp &&
+        isValidOptionalTimestamp('updatedAt');
+    }
+
+    function isValidInvoice(data) {
+      return hasOnlyAllowedFields(['id', 'businessId', 'bookingId', 'invoiceNumber', 'amount', 'paymentStatus', 'createdAt', 'updatedAt']) &&
+        hasRequiredFields(['id', 'businessId', 'bookingId', 'invoiceNumber', 'amount', 'paymentStatus', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
+        data.bookingId is string && data.bookingId.size() >= 1 && data.bookingId.size() <= 64 &&
+        data.invoiceNumber is string && data.invoiceNumber.size() >= 1 && data.invoiceNumber.size() <= 50 &&
+        data.amount is number && data.amount >= 0 && data.amount <= 100000000 &&
+        data.paymentStatus in ['UNPAID', 'PARTIAL', 'PAID'] &&
+        data.createdAt is timestamp &&
+        isValidOptionalTimestamp('updatedAt');
+    }
+
+    function isValidExpense(data) {
+      return hasOnlyAllowedFields(['id', 'businessId', 'title', 'amount', 'category', 'date', 'createdAt', 'updatedAt']) &&
+        hasRequiredFields(['id', 'businessId', 'title', 'amount', 'category', 'date', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.amount is number && data.amount > 0 && data.amount <= 100000000 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 50 &&
+        isValidDateField(data.date) &&
+        data.createdAt is timestamp &&
+        isValidOptionalTimestamp('updatedAt');
+    }
+
+    function isValidIncome(data) {
+      return hasOnlyAllowedFields(['id', 'businessId', 'title', 'amount', 'category', 'date', 'createdAt', 'updatedAt']) &&
+        hasRequiredFields(['id', 'businessId', 'title', 'amount', 'category', 'date', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.amount is number && data.amount > 0 && data.amount <= 100000000 &&
+        data.category in ['TICKET_SALE', 'COMMISSION', 'REFUND', 'OTHER'] &&
+        isValidDateField(data.date) &&
+        data.createdAt is timestamp &&
+        isValidOptionalTimestamp('updatedAt');
+    }
+
+    function isValidBackup(data) {
+      return hasOnlyAllowedFields(['id', 'businessId', 'exportedAt', 'sizeBytes', 'status', 'url', 'createdAt', 'updatedAt']) &&
+        hasRequiredFields(['id', 'businessId', 'exportedAt', 'sizeBytes', 'status', 'url']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
+        data.exportedAt is timestamp &&
+        data.sizeBytes is int && data.sizeBytes >= 0 &&
+        data.status in ['PENDING', 'COMPLETED', 'FAILED'] &&
+        isValidUrl(data.url) &&
+        isValidOptionalTimestamp('createdAt') &&
+        isValidOptionalTimestamp('updatedAt');
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // 1. Businesses Collection
+    match /businesses/{businessId} {
+      allow read: if isTenantMember(businessId);
+
+      allow create: if isAuthenticated() &&
+        isValidBusiness(request.resource.data) &&
+        request.resource.data.id == businessId;
+
+      allow update: if isAuthenticated() &&
+        (isTenantAdmin(businessId) || isSuperAdmin()) &&
+        isValidBusiness(request.resource.data) &&
+        areImmutableFieldsUnchanged(['id', 'createdAt']);
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // 2. Users Collection
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        isOwner(userId) ||
+        isTenantMember(resource.data.businessId) ||
+        isSuperAdmin()
+      );
+
+      allow create: if isAuthenticated() &&
+        isValidUser(request.resource.data) &&
+        request.resource.data.uid == userId && (
+          isSuperAdmin() ||
+          (isTenantAdmin(request.resource.data.businessId) && request.resource.data.role != 'SUPER_ADMIN') ||
+          (
+            isOwner(userId) &&
+            (request.resource.data.role == 'ADMIN' || request.resource.data.role == 'STAFF') &&
+            request.resource.data.status == 'ACTIVE'
+          )
+        );
+
+      allow update: if isAuthenticated() &&
+        isValidUser(request.resource.data) &&
+        areImmutableFieldsUnchanged(['uid', 'businessId']) && (
+          isSuperAdmin() ||
+          (isTenantAdmin(resource.data.businessId) && request.resource.data.role != 'SUPER_ADMIN') ||
+          (
+            isOwner(userId) &&
+            request.resource.data.role == resource.data.role &&
+            request.resource.data.status == resource.data.status
+          )
+        );
+
+      allow delete: if isAuthenticated() &&
+        (isTenantAdmin(resource.data.businessId) || isSuperAdmin()) &&
+        !isOwner(userId);
+    }
+
+    // 3. Customers Collection
+    match /customers/{customerId} {
+      allow read: if isTenantMember(resource.data.businessId);
+
+      allow create: if isTenantMember(request.resource.data.businessId) &&
+        isValidCustomer(request.resource.data) &&
+        request.resource.data.id == customerId;
+
+      allow update: if isTenantMember(resource.data.businessId) &&
+        isTenantMember(request.resource.data.businessId) &&
+        isValidCustomer(request.resource.data) &&
+        areImmutableFieldsUnchanged(['id', 'businessId', 'createdAt']);
+
+      allow delete: if isAuthenticated() &&
+        (isTenantAdmin(resource.data.businessId) || isSuperAdmin());
+    }
+
+    // 4. Bookings Collection
+    match /bookings/{bookingId} {
+      allow read: if isTenantMember(resource.data.businessId);
+
+      allow create: if isTenantMember(request.resource.data.businessId) &&
+        isValidBooking(request.resource.data) &&
+        request.resource.data.id == bookingId;
+
+      allow update: if isTenantMember(resource.data.businessId) &&
+        isTenantMember(request.resource.data.businessId) &&
+        isValidBooking(request.resource.data) &&
+        areImmutableFieldsUnchanged(['id', 'businessId', 'createdAt']);
+
+      allow delete: if isAuthenticated() &&
+        (isTenantAdmin(resource.data.businessId) || isSuperAdmin());
+    }
+
+    // 5. Invoices Collection
+    match /invoices/{invoiceId} {
+      allow read: if isTenantMember(resource.data.businessId);
+
+      allow create: if isTenantMember(request.resource.data.businessId) &&
+        isValidInvoice(request.resource.data) &&
+        request.resource.data.id == invoiceId;
+
+      allow update: if isTenantMember(resource.data.businessId) &&
+        isTenantMember(request.resource.data.businessId) &&
+        isValidInvoice(request.resource.data) &&
+        areImmutableFieldsUnchanged(['id', 'businessId', 'bookingId', 'invoiceNumber', 'createdAt']);
+
+      allow delete: if isAuthenticated() &&
+        (isTenantAdmin(resource.data.businessId) || isSuperAdmin());
+    }
+
+    // 6. Expenses Collection
+    match /expenses/{expenseId} {
+      allow read: if isTenantMember(resource.data.businessId);
+
+      allow create: if isTenantMember(request.resource.data.businessId) &&
+        isValidExpense(request.resource.data) &&
+        request.resource.data.id == expenseId;
+
+      allow update: if isTenantMember(resource.data.businessId) &&
+        isTenantMember(request.resource.data.businessId) &&
+        isValidExpense(request.resource.data) &&
+        areImmutableFieldsUnchanged(['id', 'businessId', 'createdAt']);
+
+      allow delete: if isAuthenticated() &&
+        (isTenantAdmin(resource.data.businessId) || isSuperAdmin());
+    }
+
+    // 7. Income Collection
+    match /income/{incomeId} {
+      allow read: if isTenantMember(resource.data.businessId);
+
+      allow create: if isTenantMember(request.resource.data.businessId) &&
+        isValidIncome(request.resource.data) &&
+        request.resource.data.id == incomeId;
+
+      allow update: if isTenantMember(resource.data.businessId) &&
+        isTenantMember(request.resource.data.businessId) &&
+        isValidIncome(request.resource.data) &&
+        areImmutableFieldsUnchanged(['id', 'businessId', 'createdAt']);
+
+      allow delete: if isAuthenticated() &&
+        (isTenantAdmin(resource.data.businessId) || isSuperAdmin());
+    }
+
+    // 8. Backups Collection
+    match /backups/{backupId} {
+      allow read: if isTenantMember(resource.data.businessId);
+
+      allow create: if isTenantMember(request.resource.data.businessId) &&
+        isValidBackup(request.resource.data) &&
+        request.resource.data.id == backupId;
+
+      allow update: if isTenantMember(resource.data.businessId) &&
+        isTenantMember(request.resource.data.businessId) &&
+        isValidBackup(request.resource.data) &&
+        areImmutableFieldsUnchanged(['id', 'businessId', 'exportedAt']);
+
+      allow delete: if isAuthenticated() &&
+        (isTenantAdmin(resource.data.businessId) || isSuperAdmin());
+    }
+  }
+}

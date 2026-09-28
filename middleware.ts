@@ -28,10 +28,11 @@ export function middleware(request: NextRequest) {
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
     // Tailwind injects a <style> tag at runtime in dev.
     `style-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: https://lh3.googleusercontent.com",
     "font-src 'self' data:",
-    // Every API call, including the refresh-token round trip.
-    `connect-src 'self' ${apiOrigin}`,
+    // Every API call, including backend API, Firebase Auth, and Firestore
+    `connect-src 'self' ${apiOrigin} https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com`,
+    "frame-src 'self' https://traveltourism-32d7d.firebaseapp.com https://accounts.google.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

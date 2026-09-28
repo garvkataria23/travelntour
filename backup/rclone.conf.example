@@ -37,7 +37,20 @@ service_account_file = /etc/flyconnect/sa.json
 team_drive =
 
 # ---------------------------------------------------------------------------
-# Storage backend 2 — MEGA (FALLBACK)
+# Storage backend 2 — Firebase Storage / Google Cloud Storage
+#
+# Project: traveltourism-32d7d (75010608480)
+# Bucket: traveltourism-32d7d.firebasestorage.app
+# Uses the same service account JSON (/etc/flyconnect/sa.json).
+# ---------------------------------------------------------------------------
+[firebase]
+type = google cloud storage
+project_number = 75010608480
+service_account_file = /etc/flyconnect/sa.json
+bucket_policy_only = true
+
+# ---------------------------------------------------------------------------
+# Storage backend 3 — MEGA (FALLBACK)
 #
 # Different vendor, different infrastructure, different failure domain. That
 # independence is the entire point: a fallback on the same cloud as the primary
@@ -90,3 +103,15 @@ password = <run: rclone obscure 'a-long-random-string'>
 password2 = <run: rclone obscure 'a-different-long-random-string'>
 filename_encryption = standard
 directory_name_encryption = true
+
+# ---------------------------------------------------------------------------
+# Crypt wrapper for Firebase Storage. Uses the SAME passwords as above.
+# ---------------------------------------------------------------------------
+[firebase-crypt]
+type = crypt
+remote = firebase:traveltourism-32d7d.firebasestorage.app/backups
+password = <run: rclone obscure 'a-long-random-string'>
+password2 = <run: rclone obscure 'a-different-long-random-string'>
+filename_encryption = standard
+directory_name_encryption = true
+

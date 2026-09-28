@@ -273,4 +273,72 @@ export class StorageService {
       },
     };
   }
+
+  /**
+   * Complete business data export for one-click backups.
+   * Exports all tenant-scoped entities: customers, bookings, invoices, expenses, income, settings.
+   */
+  async exportBusinessBackup(businessId: string) {
+    const [
+      business,
+      setting,
+      users,
+      customers,
+      bookings,
+      expenses,
+      income,
+      templates,
+      automationRules,
+      whatsappAccount,
+    ] = await Promise.all([
+      this.prisma.business.findUnique({ where: { id: businessId } }),
+      this.prisma.businessSetting.findUnique({ where: { businessId } }),
+      this.prisma.user.findMany({
+        where: { businessId },
+        select: { id: true, name: true, email: true, phone: true, role: true, status: true, createdAt: true },
+      }),
+      this.prisma.customer.findMany({ where: { businessId } }),
+      this.prisma.booking.findMany({
+        where: { businessId },
+        include: { invoiceItems: true },
+      }),
+      this.prisma.expense.findMany({ where: { businessId } }),
+      this.prisma.income.findMany({ where: { businessId } }),
+      this.prisma.messageTemplate.findMany({ where: { businessId } }),
+      this.prisma.automationRule.findMany({ where: { businessId } }),
+      this.prisma.whatsAppAccount.findMany({
+        where: { businessId },
+        select: { id: true, phoneNumberId: true, displayPhoneNumber: true, status: true },
+      }),
+    ]);
+
+    return {
+      appName: 'FlyConnect',
+      version: '1.0.0',
+      exportedAt: new Date().toISOString(),
+      businessId,
+      businessName: business?.name || 'FlyConnect Business',
+      counts: {
+        users: users.length,
+        customers: customers.length,
+        bookings: bookings.length,
+        expenses: expenses.length,
+        income: income.length,
+        templates: templates.length,
+        automationRules: automationRules.length,
+      },
+      data: {
+        business,
+        setting,
+        users,
+        customers,
+        bookings,
+        expenses,
+        income,
+        templates,
+        automationRules,
+        whatsappAccount,
+      },
+    };
+  }
 }

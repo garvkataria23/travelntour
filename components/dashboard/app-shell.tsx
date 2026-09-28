@@ -7,6 +7,7 @@ import { ReactNode, useEffect, useRef, useState } from "react";
 import { api, clearSession, formatDate, getAccessToken, getStoredUser, type ApiUser } from "@/lib/api";
 import { useApi, useOffline } from "@/lib/hooks";
 import { CurrencyProvider, useCurrency } from "@/lib/currency";
+import { logOut as firebaseLogOut } from "@/lib/firebase";
 
 const NAV_ITEMS: Array<{ label: string; href: string; icon: LucideIcon }> = [
   { label: "Dashboard", href: "/dashboard", icon: Home },
@@ -69,7 +70,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         <LogoutDialog
           open={logoutOpen}
           onCancel={() => setLogoutOpen(false)}
-          onConfirm={() => { clearSession(); router.replace("/"); }}
+          onConfirm={async () => {
+            try {
+              await firebaseLogOut();
+            } catch {
+              // ignore
+            }
+            clearSession();
+            router.replace("/");
+          }}
         />
       </div>
     </CurrencyProvider>
