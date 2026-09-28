@@ -28,10 +28,14 @@ export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfi
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// Authentication Providers
+// Standard Authentication Provider (Non-sensitive: profile, email, openid only)
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
-googleProvider.addScope("https://www.googleapis.com/auth/drive.metadata.readonly");
+
+// Optional Drive Provider specifically for Drive Quota if requested in settings
+export const googleDriveProvider = new GoogleAuthProvider();
+googleDriveProvider.setCustomParameters({ prompt: "select_account" });
+googleDriveProvider.addScope("https://www.googleapis.com/auth/drive.metadata.readonly");
 
 export interface DriveStorageQuota {
   limit: number;
@@ -92,8 +96,8 @@ export async function fetchDriveQuota(accessToken: string): Promise<DriveStorage
 /**
  * Sign in using Google OAuth Popup and return user and OAuth access token.
  */
-export async function signInWithGoogle() {
-  const result = await signInWithPopup(auth, googleProvider);
+export async function signInWithGoogle(provider: GoogleAuthProvider = googleProvider) {
+  const result = await signInWithPopup(auth, provider);
   const credential = GoogleAuthProvider.credentialFromResult(result);
   return {
     user: result.user,
