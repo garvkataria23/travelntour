@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { UpdateBanner } from "@/components/update-banner";
 
 export const metadata: Metadata = {
-  title: "FlyConnect | Login",
-  description: "Travel automation login for FlyConnect"
+  title: "FlyConnect | Travel & Tourism Platform",
+  description: "Travel automation and booking operations for FlyConnect",
 };
 
 // The CSP in middleware.ts uses a per-request nonce, which cannot be baked into
@@ -15,7 +16,10 @@ export const dynamic = "force-dynamic";
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body suppressHydrationWarning>{children}</body>
+      <body suppressHydrationWarning>
+        <UpdateBanner />
+        {children}
+      </body>
     </html>
   );
 }
