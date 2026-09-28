@@ -1,5 +1,0 @@
-# Keep all real secrets out of git
-.env
-*.pem
-*.key
-*.jks
