@@ -69,21 +69,15 @@ export function localeFor(currency: string): string {
   return CURRENCY_LOCALES[code] ?? "en-US";
 }
 
-export interface MoneyFormatOptions {
-  digits?: number;
-  dashWhenEmpty?: boolean;
-}
-
 export function formatMoney(
   value: number | null | undefined,
   currency = BASE_CURRENCY,
-  options: MoneyFormatOptions = {},
 ): string {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return options.dashWhenEmpty ? "—" : formatMoney(0, currency, { ...options, dashWhenEmpty: false });
+    return formatMoney(0, currency);
   }
   const code = (currency || BASE_CURRENCY).toUpperCase();
-  const digits = options.digits ?? minorUnitDigits(code);
+  const digits = minorUnitDigits(code);
   return new Intl.NumberFormat(localeFor(code), {
     style: "currency",
     currency: code,

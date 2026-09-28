@@ -45,7 +45,9 @@ export function parseAirportInput(input: string): { code: string; city: string }
 
 const prisma = new PrismaClient();
 const TZ = 'Asia/Kolkata';
-const BUSINESS_NAME = 'Blue Aura Tourism';
+const BASE_CURRENCY = 'AED';
+const BUSINESS_NAME = 'BlueAura Tourism';
+const ADMIN_EMAIL = 'admin@flyconnect.dev';
 
 const TEMPLATES: Array<{
   key: string;
@@ -164,10 +166,27 @@ Team {{business_name}}`,
 ];
 
 async function main() {
-  const existing = await prisma.business.findFirst({ where: { name: BUSINESS_NAME } });
+  // Identify the seeded install by its unique admin email, never by business name.
+  // A renamed or legacy-configured database would otherwise miss the check, try to
+  // create a second business and then hard-fail on the unique admin email.
+  const existingAdmin = await prisma.user.findUnique({
+    where: { email: ADMIN_EMAIL },
+    include: { business: { include: { setting: true } } },
+  });
 
-  if (existing) {
-    console.log('Seed data already exists. Skipping.');
+  if (existingAdmin) {
+    const { business } = existingAdmin;
+    await prisma.business.update({
+      where: { id: business.id },
+      data: { name: BUSINESS_NAME, currency: BASE_CURRENCY },
+    });
+    if (business.setting) {
+      await prisma.businessSetting.update({
+        where: { businessId: business.id },
+        data: { currency: BASE_CURRENCY, defaultCurrency: BASE_CURRENCY },
+      });
+    }
+    console.log(`Seed data already exists for ${ADMIN_EMAIL}. Reconciled base currency to ${BASE_CURRENCY}.`);
     return;
   }
 
@@ -177,19 +196,19 @@ async function main() {
       email: 'hello@blueauratourism.com',
       phone: '+91 88282 88282',
       timezone: TZ,
-      currency: 'AED',
+      currency: BASE_CURRENCY,
     },
   });
 
   await prisma.businessSetting.create({
-    data: { businessId: business.id, timezone: TZ, currency: 'AED', defaultCurrency: 'AED' },
+    data: { businessId: business.id, timezone: TZ, currency: BASE_CURRENCY, defaultCurrency: BASE_CURRENCY },
   });
 
   const admin = await prisma.user.create({
     data: {
       businessId: business.id,
       name: 'Garv Kataria',
-      email: 'admin@flyconnect.dev',
+      email: ADMIN_EMAIL,
       phone: '+91 98765 43210',
       passwordHash: await bcrypt.hash(adminPassword, 12),
       role: Role.ADMIN,
