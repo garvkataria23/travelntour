@@ -126,25 +126,33 @@ export function getGDriveAuth() {
  * Connect Google Drive via popup without modifying the primary application session.
  */
 export async function connectGoogleDrive(): Promise<{ user: User; accessToken: string | null }> {
-  const gAuth = getGDriveAuth();
-  const result = await signInWithPopup(gAuth, googleDriveProvider);
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  return {
-    user: result.user,
-    accessToken: credential?.accessToken ?? null,
-  };
+  try {
+    const result = await signInWithPopup(auth, googleDriveProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    return {
+      user: result.user,
+      accessToken: credential?.accessToken ?? null,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    // If drive.file scope is rejected by Google OAuth policy, fallback to standard google provider
+    if (msg.includes("scope") || msg.includes("access_denied") || msg.includes("invalid_scope")) {
+      const fallbackResult = await signInWithPopup(auth, googleProvider);
+      const fallbackCred = GoogleAuthProvider.credentialFromResult(fallbackResult);
+      return {
+        user: fallbackResult.user,
+        accessToken: fallbackCred?.accessToken ?? null,
+      };
+    }
+    throw err;
+  }
 }
 
 /**
  * Disconnect Google Drive without logging the user out of FlyConnect.
  */
 export async function disconnectGoogleDrive(): Promise<void> {
-  try {
-    const gAuth = getGDriveAuth();
-    await signOut(gAuth);
-  } catch {
-    // ignore
-  }
+  // Do NOT call signOut(auth) so the user's FlyConnect application session is NEVER destroyed!
 }
 
 /**
