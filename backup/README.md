@@ -96,6 +96,46 @@ Four remotes must exist — see `rclone.conf.example` for the exact fields.
 > file you are about to make unreadable. Note also that `sudo cat` of a key file
 > lands in your terminal scrollback, and on any shared session logger; shred the
 > plaintext as soon as the password manager has it.
+>
+> **Verify the password manager copy before you shred.** A typo at the shred step
+> is the single unrecoverable mistake in this whole procedure: it makes every
+> existing backup permanently unreadable. Before shredding, prove the stored
+> value is byte-identical by re-obscuring it and comparing:
+>
+> ```bash
+> # for each of the two crypt values
+> rclone obscure 'PASTE_FROM_PM_HERE'      # must equal the value in rclone.conf
+> ```
+>
+> Only shred once that matches.
+
+### 4b. Required after encryption: `RCLONE_CONFIG_PASS`
+
+**Encrypting the config breaks every unattended run unless you do this step.**
+Cron has no TTY, so an encrypted `rclone.conf` makes each invocation exit
+immediately:
+
+```
+CRITICAL: Failed to read line: EOF
+```
+
+That fails both the backup and the drill, and does it on every single tick —
+so it looks like a working cron with no output, which is the worst possible
+failure mode.
+
+Add the config password to `/etc/flyconnect/backup.env` (mode 640, root-only):
+
+```bash
+RCLONE_CONFIG_PASS=the-config-encryption-password
+```
+
+Both scripts `source` that file and then `export` this variable explicitly —
+a bare `source` does not export, so without that line the variable would be set
+but invisible to rclone. The alternative is `--password-command`, but that
+means editing every rclone call site.
+
+Note this is the *config* password, not a crypt key. The crypt keys stay inside
+`rclone.conf`; compromising `backup.env` on its own does not reveal them.
 
 Then verify **functionally**. A text check cannot work here: the values in
 `rclone.conf` are `rclone obscure`d, so a placeholder and a real credential look

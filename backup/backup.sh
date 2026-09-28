@@ -30,6 +30,22 @@ if [[ -r "$CONFIG_FILE" ]]; then
   source "$CONFIG_FILE"
 fi
 
+# Once rclone.conf is encrypted with `rclone config encryption set`, every
+# rclone invocation must be able to decrypt it. Cron has no TTY, so without
+# this the run dies immediately with:
+#
+#     CRITICAL: Failed to read line: EOF
+#
+# and every backup and drill fails silently from the log's point of view. A
+# plain `source` does not export, so RCLONE_CONFIG_PASS set in backup.env would
+# never reach rclone — export it explicitly here.
+#
+# The value is the *config* encryption password, not a crypt key. The crypt
+# keys stay inside rclone.conf; losing backup.env alone does not expose them.
+if [[ -n "${RCLONE_CONFIG_PASS:-}" ]]; then
+  export RCLONE_CONFIG_PASS
+fi
+
 # Container identity. Must match docker-compose.yml.
 PG_CONTAINER="${PG_CONTAINER:-flyconnect-postgres}"
 PG_USER="${PG_USER:-flyconnect}"

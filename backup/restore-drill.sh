@@ -33,6 +33,13 @@ if [[ -r "$CONFIG_FILE" ]]; then
   source "$CONFIG_FILE"
 fi
 
+# An encrypted rclone.conf needs its password in the environment for unattended
+# runs, or rclone exits with "Failed to read line: EOF" the moment cron runs
+# this. `source` does not export, so do it explicitly.
+if [[ -n "${RCLONE_CONFIG_PASS:-}" ]]; then
+  export RCLONE_CONFIG_PASS
+fi
+
 PG_CONTAINER="${PG_CONTAINER:-flyconnect-postgres}"
 PG_USER="${PG_USER:-flyconnect}"
 PG_DB="${PG_DB:-flyconnect}"

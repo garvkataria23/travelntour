@@ -255,13 +255,27 @@ identical to the repo.
 - **Then** `sudo rclone config encryption set`, and store *that* password in the same
   note before shredding anything else. The order is: keys → config password →
   shred. Encrypting the config first leaves the keys recoverable from nowhere.
+  **Before shredding, re-obscure the value from the password manager and compare
+  it to the one in `rclone.conf`** — a typo at the shred step is the only
+  unrecoverable mistake available here.
+- **Then set `RCLONE_CONFIG_PASS` in `/etc/flyconnect/backup.env`**, or every cron
+  run dies with `CRITICAL: Failed to read line: EOF` the moment the config is
+  encrypted. This was found by testing rather than reading: the failure is
+  silent, hits backup *and* drill, and looks like a healthy cron producing no
+  output. Both scripts now `export` the variable explicitly, because the
+  `source` of `backup.env` does not export.
 - **MEGA:** sign in through the browser once first. rclone cannot bootstrap the
   account's encryption keys; without this the login fails. Enable 2FA and set a
   recovery email. Then fill `[mega] user` and `pass` in `rclone.conf` —
-  `pass` is currently an obscured *placeholder*.
+  `pass` is currently an obscured *placeholder*. Only those two fields; the
+  `password2` in the config belongs to the crypt layer, not to MEGA.
 - **Google:** enable the Drive API, create a service account, download the JSON
   key, `sudo install -m 600 sa.json /etc/flyconnect/sa.json`, then share a Drive
-  folder with the service account's `client_email` as Editor.
+  folder with the service account's `client_email` as Editor. The folder must be
+  named exactly `flyconnect-backups`, since `remote = gdrive:flyconnect-backups`
+  is a path inside the service account's own Drive, not a folder ID.
+  `root_folder_id` is *not* in `rclone.conf.example` — it is an optional drive
+  backend addition if the service account's root is ambiguous.
 
 ### Verifying the credentials — functionally, not by text
 
