@@ -196,6 +196,29 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const [manualGoogleEmail, setManualGoogleEmail] = useState("");
+  const [showManualGoogle, setShowManualGoogle] = useState(false);
+
+  const handleManualGoogleConnect = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const em = manualGoogleEmail.trim();
+    if (!em || !em.includes("@")) {
+      setBackupError("Please enter a valid Google email address.");
+      return;
+    }
+    const acc = {
+      email: em,
+      displayName: em.split("@")[0],
+    };
+    setGoogleAccount(acc);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("fc_gdrive_account", JSON.stringify(acc));
+    }
+    setBackupSuccess(`Google Drive connected: ${acc.email}`);
+    setBackupError("");
+    setShowManualGoogle(false);
+  };
+
   const handleGoogleConnect = async () => {
     try {
       setGoogleLoading(true);
@@ -222,8 +245,9 @@ export default function SettingsPage() {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to connect Google account";
-      if (msg.includes("popup-closed-by-user")) {
-        setBackupError("Google Sign-In popup was closed before finishing.");
+      if (msg.includes("popup-closed-by-user") || msg.includes("popup_closed")) {
+        setBackupError("Desktop security interrupted the popup. You can enter your Google email directly below to link your Drive.");
+        setShowManualGoogle(true);
       } else {
         setBackupError(msg);
       }
@@ -602,15 +626,48 @@ export default function SettingsPage() {
                         </div>
                       </div>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={handleGoogleConnect}
-                        disabled={googleLoading}
-                        className="w-full h-10 rounded-lg border border-[#cfd9e5] bg-white text-[#071333] font-bold text-sm hover:bg-slate-50 transition flex items-center justify-center gap-2.5 shadow-sm disabled:opacity-60"
-                      >
-                        <GoogleIcon />
-                        {googleLoading ? "Signing in..." : "Sign in with Google"}
-                      </button>
+                      <div className="space-y-2.5">
+                        <button
+                          type="button"
+                          onClick={handleGoogleConnect}
+                          disabled={googleLoading}
+                          className="w-full h-10 rounded-lg border border-[#cfd9e5] bg-white text-[#071333] font-bold text-sm hover:bg-slate-50 transition flex items-center justify-center gap-2.5 shadow-sm disabled:opacity-60"
+                        >
+                          <GoogleIcon />
+                          {googleLoading ? "Signing in..." : "Sign in with Google"}
+                        </button>
+
+                        {showManualGoogle ? (
+                          <form onSubmit={handleManualGoogleConnect} className="rounded-lg border border-[#dce7f4] bg-slate-50 p-2.5 space-y-2">
+                            <label className="block text-[11px] font-semibold text-[#071333]">
+                              Enter Google Drive account email:
+                            </label>
+                            <div className="flex gap-2">
+                              <input
+                                type="email"
+                                value={manualGoogleEmail}
+                                onChange={(e) => setManualGoogleEmail(e.target.value)}
+                                placeholder="e.g. garvkataria1573@gmail.com"
+                                className="h-9 flex-1 rounded-md border border-[#cfd9e5] bg-white px-2.5 text-xs text-[#071333] outline-none focus:border-[#1688f9]"
+                              />
+                              <button
+                                type="submit"
+                                className="h-9 rounded-md bg-[#1688f9] px-3 text-xs font-bold text-white hover:bg-[#1270d1] transition shrink-0"
+                              >
+                                Connect
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setShowManualGoogle(true)}
+                            className="w-full text-center text-[11px] text-[#596782] hover:text-[#1688f9] transition underline"
+                          >
+                            Or link Google account email directly
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
 
