@@ -1,8 +1,17 @@
 backend
+desktop
 META-WHATSAPP-API-KIT
+.next
 .next-stale
+out
+dist
+release
+backup
+.agents
 static-serve.mjs
 *.log
 .env
 .env.local
 .env.production
+*.key
+*.pem
