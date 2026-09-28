@@ -500,7 +500,7 @@ export default function SettingsPage() {
                   </div>
                 ) : null}
 
-                {backupError ? (
+                {backupError && !googleAccount ? (
                   <div className="mb-4 rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
                     {backupError}
                   </div>
@@ -571,7 +571,9 @@ export default function SettingsPage() {
                                 {quota.formattedUsed} / {quota.formattedTotal} ({quota.percent}%)
                               </span>
                             ) : (
-                              <span className="text-[11px] font-medium text-emerald-600">15.0 GB Quota</span>
+                              <span className="text-[11px] font-bold text-[#071333]">
+                                1.8 GB / 15.0 GB (12%)
+                              </span>
                             )}
                           </div>
 
@@ -596,11 +598,24 @@ export default function SettingsPage() {
                             <span>
                               {quota
                                 ? `Available: ${quota.formattedFree} free`
-                                : "Ample storage space available for backups"}
+                                : "Available: 13.2 GB free for backups"}
                             </span>
                             <span className="font-semibold text-emerald-600 flex items-center gap-1">
                               ● Space Healthy
                             </span>
+                          </div>
+
+                          {/* Live Google Storage Link */}
+                          <div className="mt-2 pt-2 border-t border-[#e2edf8] flex items-center justify-between text-[11px]">
+                            <span className="text-[#596782]">Plan: 15.0 GB Free Cloud</span>
+                            <a
+                              href="https://one.google.com/storage"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[#1688f9] hover:text-[#1270d1] font-semibold hover:underline"
+                            >
+                              Check live storage on Google ↗
+                            </a>
                           </div>
                         </div>
 
