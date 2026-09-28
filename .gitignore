@@ -11,6 +11,9 @@ yarn-error.log*
 pnpm-debug.log*
 *.log
 tsconfig.tsbuildinfo
+# Incremental build info. `nest build` writes tsconfig.build.tsbuildinfo, which the
+# bare pattern above does not match.
+*.tsbuildinfo
 .DS_Store
 .vercel
 

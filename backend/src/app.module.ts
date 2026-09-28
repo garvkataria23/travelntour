@@ -19,6 +19,7 @@ import { QueueModule } from './queue/queue.module';
 import { ReportsModule } from './reports/reports.module';
 import { SearchModule } from './search/search.module';
 import { SettingsModule } from './settings/settings.module';
+import { StorageModule } from './storage/storage.module';
 import { TemplatesModule } from './templates/templates.module';
 import { UsersModule } from './users/users.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
@@ -52,6 +53,7 @@ import { JwtAuthGuard } from './common/jwt-auth.guard';
     ExpensesModule,
     IncomeModule,
     InvoicesModule,
+    StorageModule,
     CurrencyModule,
     HealthModule,
   ],

@@ -7,6 +7,7 @@ import { allocateInvoiceNumber } from '../common/invoice-number';
 import { paginationMeta } from '../common/pagination';
 import { BASE_CURRENCY, formatMoney } from '../currency/decimals';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService, InvoicePayload } from '../storage/storage.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { CreateInvoiceItemDto, SetPaymentDto, UpdateInvoiceItemDto } from './dto/invoice.dto';
 import { renderInvoicePdf } from './invoice-pdf.util';
@@ -25,6 +26,7 @@ export class InvoicesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly whatsapp: WhatsAppService,
+    private readonly storage: StorageService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -257,7 +259,54 @@ export class InvoicesService {
       invoiceNumber: issued.invoiceNumber,
     });
 
+    // Freeze the document now, while the numbers are the ones just committed. From
+    // here on the served PDF comes from this snapshot rather than a live re-render, so
+    // later corrections cannot rewrite what the customer was given.
+    await this.captureInvoiceDocument(user, id);
+
     return this.serialize(issued as Booking, issued.invoiceItems as InvoiceItem[]);
+  }
+
+  /**
+   * Render the current invoice and store it as the issued document.
+   *
+   * Separate from `issue()` so that editing line items on an already-issued invoice
+   * can re-capture deliberately, and so a failure here never rolls back a committed
+   * invoice number.
+   */
+  async captureInvoiceDocument(user: AuthUser, id: string) {
+    const { booking, pdf, pdfInput, totals } = await this.buildPdf(user, id);
+    if (!booking.invoiceNumber) return null;
+
+    const itemsTotal = (booking.invoiceItems as InvoiceItem[]).reduce((sum, i) => sum + (i.amount || 0), 0);
+
+    const payload: InvoicePayload = {
+      booking: { ...(booking as unknown as Record<string, unknown>) },
+      customer: { ...(booking.customer as unknown as Record<string, unknown>) },
+      business: { ...pdfInput.business },
+      setting: { ...pdfInput.setting },
+      items: (booking.invoiceItems as InvoiceItem[]).map((i) => ({ ...(i as unknown as Record<string, unknown>) })),
+      subtotal: totals.subtotal,
+      discount: totals.discount,
+      taxAmount: totals.taxAmount,
+      total: totals.total,
+      paidAmount: Math.min(booking.paidAmount ?? 0, totals.total),
+      itemsTotal,
+      // The date the document is anchored to, matching the one the PDF was rendered
+      // with. Storing "now" here instead would make the audit payload disagree with the
+      // bytes it is supposed to explain.
+      renderedAt: (booking.invoiceIssuedAt ?? new Date()).toISOString(),
+    };
+
+    await this.storage.snapshotInvoice({
+      businessId: user.businessId,
+      bookingId: id,
+      invoiceNumber: booking.invoiceNumber,
+      pdf,
+      payload,
+    });
+
+    return { invoiceNumber: booking.invoiceNumber, total: totals.total };
   }
 
   // ------------------------------------------------------------------
@@ -386,44 +435,97 @@ export class InvoicesService {
     const totals = this.computeTotals(booking as Booking, items);
     const paidAmount = Math.min(booking.paidAmount ?? 0, totals.total);
 
+    const pdfInput = {
+      booking: booking as Booking,
+      customer: booking.customer,
+      business: {
+        name: business?.name,
+        email: business?.email,
+        phone: business?.phone,
+        logo: business?.logo,
+      },
+      setting: {
+        gstin: setting?.gstin,
+        gstRate: setting?.gstRate,
+        gstEnabled: setting?.gstEnabled,
+      },
+      items,
+      subtotal: totals.subtotal,
+      discount: totals.discount,
+      taxAmount: totals.taxAmount,
+      total: totals.total,
+      paidAmount,
+      // Anchored to when the invoice was issued, not to the moment of rendering.
+      //
+      // The PDF footer prints a date and jsPDF stamps /CreationDate, both of which
+      // default to "now". A draft re-rendered on demand legitimately shows today's date,
+      // but an issued invoice must render to identical bytes every time - otherwise a
+      // re-capture produces a different sha256 for an unchanged document, and the stored
+      // snapshot can never be recognised as current. `invoiceIssuedAt` is the only
+      // timestamp that means "the document as it was issued".
+      generatedAt: booking.invoiceIssuedAt ?? undefined,
+    };
+
     return {
       booking,
       business,
       setting,
       fromPhone: whatsappAccount?.displayPhoneNumber ?? null,
-      pdf: renderInvoicePdf({
-        booking: booking as Booking,
-        customer: booking.customer,
-        business: {
-          name: business?.name,
-          email: business?.email,
-          phone: business?.phone,
-          logo: business?.logo,
-        },
-        setting: {
-          gstin: setting?.gstin,
-          gstRate: setting?.gstRate,
-          gstEnabled: setting?.gstEnabled,
-        },
-        items,
-        subtotal: totals.subtotal,
-        discount: totals.discount,
-        taxAmount: totals.taxAmount,
-        total: totals.total,
-        paidAmount,
-      }),
+      pdf: renderInvoicePdf(pdfInput),
       totals,
+      pdfInput,
     };
   }
 
+  /**
+   * Fetch the PDF a customer was actually issued.
+   *
+   * The stored snapshot wins over a live render. That is the whole point of keeping
+   * it: an issued invoice is a financial record, and a live re-render would silently
+   * rewrite it the moment the business name, GSTIN or an itemised line is corrected.
+   * Falls back to rendering when nothing is stored (issued before this feature, or the
+   * retention sweep has dropped the bytes) so no invoice ever becomes undownloadable.
+   */
+  private async pdfForIssued(bookingId: string, build: () => Promise<Buffer>): Promise<{ pdf: Buffer; stored: boolean }> {
+    const snapshot = await this.storage.readInvoicePdf(bookingId);
+    if (snapshot) return { pdf: snapshot.pdf, stored: true };
+    return { pdf: await build(), stored: false };
+  }
+
   async getPdf(user: AuthUser, id: string) {
-    const { booking, pdf, totals } = await this.buildPdf(user, id);
+    // One load for both branches. A draft has nothing to preserve, but it still needs the
+    // live figures; an issued invoice needs the snapshot, and only falls back to a render
+    // if no document was ever stored or its bytes have since been swept.
+    const booking = await this.loadInvoice(user, id);
+    const totals = this.computeTotals(booking as Booking, booking.invoiceItems as InvoiceItem[]);
+
+    if (booking.invoiceNumber) {
+      const { pdf, stored } = await this.pdfForIssued(id, async () => (await this.buildPdf(user, id)).pdf);
+      // Decompressed, not read as JSON: the payload is brotli-compressed so that
+      // freezing it does not cost more than the PDF it explains.
+      const payload = await this.storage.readInvoicePayload<{ total?: number }>(id);
+
+      return {
+        fileName: `Invoice-${booking.invoiceNumber}.pdf`,
+        base64: pdf.toString('base64'),
+        // Prefer the frozen total so a corrected line item cannot disagree with the
+        // archived document the customer holds.
+        total: payload?.total ?? totals.total,
+        paymentStatus: booking.paymentStatus,
+        currency: booking.currency || BASE_CURRENCY,
+        source: stored ? 'snapshot' : 'live',
+      };
+    }
+
+    // Not yet issued: nothing to preserve, so always render current figures.
+    const { pdf } = await this.buildPdf(user, id);
     return {
-      fileName: `Invoice-${booking.invoiceNumber || booking.pnr}.pdf`,
+      fileName: `Invoice-${booking.pnr}.pdf`,
       base64: pdf.toString('base64'),
       total: totals.total,
       paymentStatus: booking.paymentStatus,
       currency: booking.currency || BASE_CURRENCY,
+      source: 'live',
     };
   }
 
@@ -432,7 +534,7 @@ export class InvoicesService {
   // ------------------------------------------------------------------
 
   async sendViaWhatsApp(user: AuthUser, id: string) {
-    const { booking, pdf, totals, fromPhone } = await this.buildPdf(user, id);
+    const { booking, pdf: livePdf, fromPhone } = await this.buildPdf(user, id);
 
     if (!booking.invoiceNumber) {
       throw new BadRequestException({
@@ -443,6 +545,15 @@ export class InvoicesService {
     if (!booking.customer.phone) {
       throw new BadRequestException({ message: 'Customer has no phone number', code: 'NO_CUSTOMER_PHONE' });
     }
+
+    // Send the same bytes the customer can download, not a fresh render. A WhatsApp
+    // message is not retrievable once sent, so this is the one place where a
+    // divergence is genuinely permanent.
+    //
+    // `livePdf` is reused as the fallback rather than rendering twice - `buildPdf` has
+    // already produced it, and re-rendering would double the cost of every send.
+    const { pdf } = await this.pdfForIssued(id, async () => livePdf);
+    const totals = this.computeTotals(booking as Booking, booking.invoiceItems as InvoiceItem[]);
 
     const fileName = `Invoice-${booking.invoiceNumber}.pdf`;
     const caption = `Dear ${booking.customer.name}, here is your invoice ${booking.invoiceNumber}. Total: ${formatMoney(

@@ -128,13 +128,36 @@ main() {
     exit 0
   fi
 
-  # Pick the dump to drill.
+  # Pick the dump to drill. Newest by modification time, NOT by name.
+  #
+  # A plain `lsf | sort -r | head -1` is only chronological because backup.sh
+  # happens to name dumps flyconnect_<YYYYMMDD_HHMMSS>.dump, where lexicographic
+  # order happens to equal chronological order. That coincidence is invisible
+  # until something else lands in the same directory with a different prefix -
+  # a hand-taken premigration snapshot, a manual copy, a test file - and then
+  # `sort -r` silently returns that file instead of the newest backup. It bit
+  # this script for real: the drill spent a run verifying a stale
+  # premigrate_* snapshot while a fresh dump sat there newer. ModTime is the
+  # property actually being asked for, so ask for it.
+  #
+  # lsjson emits one object per line with Path BEFORE ModTime, and the
+  # timestamps are ISO-8601 UTC, so a plain sort on the timestamp is
+  # chronological. The capture order matters: sed matches left to right, so
+  # Path has to be captured first even though ModTime is emitted first in the
+  # output. The trailing quote after `\.dump` is what excludes the .sha256
+  # sidecars.
   local dump
   if [[ -n "${1:-}" ]]; then
     dump="$1"
     [[ "$dump" == *.dump ]] || fail "expected a name ending in .dump, got '$dump'"
   else
-    dump="$("$RCLONE" lsf "$REMOTE" --include '*.dump' --files-only | sort -r | head -n 1)"
+    dump="$(
+      "$RCLONE" lsjson "$REMOTE" --files-only 2>/dev/null \
+        | sed -n 's/.*"Path":"\([^"]*\.dump\)".*"ModTime":"\([^"]*\)".*/\2 \1/p' \
+        | sort \
+        | tail -n 1 \
+        | cut -d' ' -f2-
+    )"
     [[ -n "$dump" ]] || fail "no .dump files found in $REMOTE — is the backup working at all?"
   fi
   log "INFO" "drilling $dump from $REMOTE"

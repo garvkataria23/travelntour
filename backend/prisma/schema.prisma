@@ -111,27 +111,28 @@ enum WhatsAppAccountStatus {
 }
 
 model Business {
-  id        String         @id @default(uuid())
-  name      String
-  logo      String?
-  email     String?
-  phone     String?
-  timezone  String         @default("Asia/Kolkata")
-  currency  String         @default("AED")
-  status    BusinessStatus @default(ACTIVE)
+  id       String         @id @default(uuid())
+  name     String
+  logo     String?
+  email    String?
+  phone    String?
+  timezone String         @default("Asia/Kolkata")
+  currency String         @default("AED")
+  status   BusinessStatus @default(ACTIVE)
 
-  users           User[]
-  customers       Customer[]
-  bookings        Booking[]
-  expenses        Expense[]
-  incomes         Income[]
-  automationRules AutomationRule[]
-  templates       MessageTemplate[]
+  users             User[]
+  customers         Customer[]
+  bookings          Booking[]
+  expenses          Expense[]
+  incomes           Income[]
+  automationRules   AutomationRule[]
+  templates         MessageTemplate[]
   scheduledMessages ScheduledMessage[]
-  messageLogs     MessageLog[]
-  whatsappAccounts WhatsAppAccount[]
-  auditLogs       AuditLog[]
-  setting         BusinessSetting?
+  messageLogs       MessageLog[]
+  whatsappAccounts  WhatsAppAccount[]
+  auditLogs         AuditLog[]
+  invoiceDocuments  InvoiceDocument[]
+  setting           BusinessSetting?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -183,18 +184,18 @@ model RefreshToken {
 }
 
 model BusinessSetting {
-  id                 String   @id @default(uuid())
-  businessId         String   @unique
-  currency           String   @default("AED")
-  timezone           String   @default("Asia/Kolkata")
+  id                 String  @id @default(uuid())
+  businessId         String  @unique
+  currency           String  @default("AED")
+  timezone           String  @default("Asia/Kolkata")
   defaultAirline     String?
   defaultTerminal    String?
-  defaultCurrency    String   @default("AED")
-  notifyConfirmation Boolean  @default(true)
-  notify48h          Boolean  @default(true)
-  notify24h          Boolean  @default(true)
-  notifyJourneyDay   Boolean  @default(true)
-  notifyCancellation Boolean  @default(true)
+  defaultCurrency    String  @default("AED")
+  notifyConfirmation Boolean @default(true)
+  notify48h          Boolean @default(true)
+  notify24h          Boolean @default(true)
+  notifyJourneyDay   Boolean @default(true)
+  notifyCancellation Boolean @default(true)
 
   gstEnabled    Boolean @default(false)
   gstRate       Float   @default(0)
@@ -217,22 +218,24 @@ model Customer {
   status     CustomerStatus @default(ACTIVE)
   version    Int            @default(0)
 
-  business  Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  bookings  Booking[]
-  messages  ScheduledMessage[]
-  logs      MessageLog[]
+  business Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+  messages ScheduledMessage[]
+  logs     MessageLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([businessId, phone])
   @@index([businessId])
-  @@index([businessId, phone])
-  @@index([businessId, name])
+  // No index on (businessId, name): customer search is a case-insensitive substring
+  // match, which a btree cannot serve, so the index was never used by the planner while
+  // still costing storage on every row. Substring search needs a trigram index, which is
+  // a deliberate choice to make if search ever gets slow enough to justify it.
 }
 
 model Booking {
-  id              String        @id @default(uuid())
+  id              String  @id @default(uuid())
   businessId      String
   customerId      String
   pnr             String
@@ -256,11 +259,11 @@ model Booking {
   amount   Float?
   currency String?
 
-  baseFare  Float?  // gross fare before discount (taxable value)
-  cost      Float?  // direct cost of the ticket (COGS)
-  discount  Float?  // discount in the booking currency applied to baseFare
-  taxRate   Float?  // GST % applied to this booking
-  taxAmount Float?  // GST amount = (baseFare - discount) * taxRate/100
+  baseFare  Float? // gross fare before discount (taxable value)
+  cost      Float? // direct cost of the ticket (COGS)
+  discount  Float? // discount in the booking currency applied to baseFare
+  taxRate   Float? // GST % applied to this booking
+  taxAmount Float? // GST amount = (baseFare - discount) * taxRate/100
 
   invoiceNumber   String?
   invoiceIssuedAt DateTime?
@@ -272,14 +275,15 @@ model Booking {
   updatedBy String?
   version   Int     @default(0)
 
-  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  creator  User      @relation(fields: [createdBy], references: [id])
-  lastEditor User?   @relation("BookingLastEditor", fields: [updatedBy], references: [id], onDelete: SetNull)
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  creator    User     @relation(fields: [createdBy], references: [id])
+  lastEditor User?    @relation("BookingLastEditor", fields: [updatedBy], references: [id], onDelete: SetNull)
 
   scheduledMessages ScheduledMessage[]
   messageLogs       MessageLog[]
   invoiceItems      InvoiceItem[]
+  invoiceDocument   InvoiceDocument?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -293,13 +297,13 @@ model Booking {
 }
 
 model InvoiceItem {
-  id          String  @id @default(uuid())
+  id          String @id @default(uuid())
   bookingId   String
   description String
-  quantity    Float   @default(1)
-  unitPrice   Float   @default(0)
-  amount      Float   @default(0)
-  sortOrder   Int     @default(0)
+  quantity    Float  @default(1)
+  unitPrice   Float  @default(0)
+  amount      Float  @default(0)
+  sortOrder   Int    @default(0)
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
@@ -310,19 +314,19 @@ model InvoiceItem {
 }
 
 model Expense {
-  id         String @id @default(uuid())
-  businessId String
-  category   ExpenseCategory @default(OPERATING)
+  id          String          @id @default(uuid())
+  businessId  String
+  category    ExpenseCategory @default(OPERATING)
   title       String
   description String?
-  amount     Float
-  currency   String @default("AED")
-  payableTo  String?
-  incurredOn DateTime @default(now())
-  createdBy  String
+  amount      Float
+  currency    String          @default("AED")
+  payableTo   String?
+  incurredOn  DateTime        @default(now())
+  createdBy   String
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  creator  User    @relation(fields: [createdBy], references: [id])
+  creator  User     @relation(fields: [createdBy], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -366,8 +370,8 @@ model AutomationRule {
   templateId    String
   active        Boolean     @default(true)
 
-  business Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  template MessageTemplate  @relation(fields: [templateId], references: [id])
+  business Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  template MessageTemplate    @relation(fields: [templateId], references: [id])
   messages ScheduledMessage[]
 
   createdAt DateTime @default(now())
@@ -378,20 +382,20 @@ model AutomationRule {
 }
 
 model MessageTemplate {
-  id                   String         @id @default(uuid())
+  id                   String           @id @default(uuid())
   businessId           String
   name                 String
   description          String?
   category             TemplateCategory @default(GENERAL)
   content              String
   whatsappTemplateName String?
-  status               TemplateStatus @default(DRAFT)
-  language             String         @default("en")
-  variables            String[]       @default([])
+  status               TemplateStatus   @default(DRAFT)
+  language             String           @default("en")
+  variables            String[]         @default([])
 
-  business   Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  rules      AutomationRule[]
-  messages   ScheduledMessage[]
+  business Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  rules    AutomationRule[]
+  messages ScheduledMessage[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -401,11 +405,11 @@ model MessageTemplate {
 }
 
 model ScheduledMessage {
-  id             String        @id @default(uuid())
-  businessId     String
-  bookingId      String
-  customerId     String
-  templateId     String
+  id               String  @id @default(uuid())
+  businessId       String
+  bookingId        String
+  customerId       String
+  templateId       String
   automationRuleId String?
 
   messageType MessageType
@@ -414,24 +418,24 @@ model ScheduledMessage {
   scheduledAt DateTime
   status      MessageStatus @default(SCHEDULED)
 
-  attempts   Int       @default(0)
-  sentAt     DateTime?
+  attempts    Int       @default(0)
+  sentAt      DateTime?
   deliveredAt DateTime?
-  readAt     DateTime?
-  failedAt   DateTime?
+  readAt      DateTime?
+  failedAt    DateTime?
 
   lastError String?
 
-  bullmqJobId  String?
-  waMessageId  String?
+  bullmqJobId     String?
+  waMessageId     String?
   renderedContent String?
 
-  business  Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  booking   Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  customer  Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  template  MessageTemplate @relation(fields: [templateId], references: [id])
-  rule      AutomationRule? @relation(fields: [automationRuleId], references: [id], onDelete: SetNull)
-  logs      MessageLog[]
+  business Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  booking  Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  customer Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  template MessageTemplate @relation(fields: [templateId], references: [id])
+  rule     AutomationRule? @relation(fields: [automationRuleId], references: [id], onDelete: SetNull)
+  logs     MessageLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -444,30 +448,30 @@ model ScheduledMessage {
 }
 
 model MessageLog {
-  id              String        @id @default(uuid())
-  businessId      String
+  id                 String  @id @default(uuid())
+  businessId         String
   scheduledMessageId String?
-  bookingId       String?
-  customerId      String
+  bookingId          String?
+  customerId         String
 
-  direction     String        @default("OUTBOUND")
-  messageType   MessageType?
-  status        MessageStatus
-  toPhone       String
-  fromPhone     String?
-  templateName  String?
-  content       String?
-  waMessageId   String?       @unique
-  errorMessage  String?
-  errorCode     String?
-  sentAt        DateTime?
-  deliveredAt   DateTime?
-  readAt        DateTime?
+  direction    String        @default("OUTBOUND")
+  messageType  MessageType?
+  status       MessageStatus
+  toPhone      String
+  fromPhone    String?
+  templateName String?
+  content      String?
+  waMessageId  String?       @unique
+  errorMessage String?
+  errorCode    String?
+  sentAt       DateTime?
+  deliveredAt  DateTime?
+  readAt       DateTime?
 
-  business Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business         Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   scheduledMessage ScheduledMessage? @relation(fields: [scheduledMessageId], references: [id], onDelete: SetNull)
-  booking  Booking?         @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  customer Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  booking          Booking?          @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  customer         Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -497,7 +501,7 @@ model WhatsAppAccount {
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
+  id         String  @id @default(uuid())
   businessId String
   userId     String?
   action     String
@@ -513,4 +517,70 @@ model AuditLog {
 
   @@index([businessId, createdAt])
   @@index([businessId, entity])
+}
+
+/// The exact PDF a customer was issued, kept so history stays truthful.
+///
+/// The invoice PDF is a pure function of Booking + InvoiceItem + BusinessSetting, so
+/// storing it is normally redundant. It is stored anyway, and this is the reason:
+/// an *issued* invoice is a financial record. If the business name, GSTIN, bank
+/// details or an itemised line is ever corrected, a live re-render silently rewrites
+/// what the customer received and what the books say. `payload` is the JSON the PDF
+/// was rendered from, so the document can be reproduced or audited even after the
+/// underlying rows move on.
+///
+/// Bytes are brotli-compressed, which measured 84% smaller than raw on a realistic
+/// 6-line invoice (10592 B -> 1681 B). `sha256` is the digest of the *uncompressed*
+/// PDF, so identical documents dedupe and the digest stays meaningful for auditing.
+model InvoiceDocument {
+  id            String @id @default(uuid())
+  businessId    String
+  bookingId     String
+  /// Invoice number at the time of issue. Denormalised on purpose: the live
+  /// Booking row can be re-pointed, but an issued number must never change.
+  invoiceNumber String
+
+  /// Rendered PDF, brotli-compressed.
+  pdf         Bytes
+  /// sha256 of the raw, uncompressed PDF. Content address for dedupe.
+  sha256      String
+  rawBytes    Int
+  storedBytes Int
+
+  /// Everything the PDF was rendered from, brotli-compressed JSON.
+  ///
+  /// Compressed because it measured *larger* than the PDF it accompanies - 3817 B of
+  /// JSON against 1650 B of brotli'd PDF on a realistic 6-line invoice. Left as raw
+  /// JSONB it was the single biggest cost per invoice, and JSONB stores the full text
+  /// of every key on every row.
+  ///
+  /// Bytes rather than JSONB means the payload can no longer be queried with SQL. That
+  /// is deliberate: it is a frozen audit artefact, read whole and never filtered on, and
+  /// paying per-row key storage for it was the wrong trade.
+  payload Bytes
+  /// Size of `payload` before compression, so the storage report can show the real
+  /// ratio without decompressing.
+  payloadRawBytes Int
+  /// Compressed size of `payload`, so the report can total the two artefacts without
+  /// reading every blob. Kept separate from `storedBytes`, which is the PDF column only.
+  payloadStoredBytes Int
+
+  /// Set when the document has been superseded by a corrected re-issue.
+  supersededAt DateTime?
+  /// Set when a retention sweep has removed the bytes but the audit trail remains.
+  prunedAt     DateTime?
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  booking  Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One authoritative document per booking. A re-issue replaces the row rather than
+  /// appending, so this must stay unique or history becomes ambiguous.
+  @@unique([bookingId])
+  @@index([businessId, createdAt])
+  @@index([businessId, invoiceNumber])
+  /// Supports the retention sweep, which only ever looks at unpruned old rows.
+  @@index([prunedAt, createdAt])
 }
