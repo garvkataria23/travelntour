@@ -104,7 +104,7 @@ function createWindow() {
           title: "Sign in with Google",
           webPreferences: {
             nodeIntegration: false,
-            contextIsolation: false,
+            contextIsolation: true,
             sandbox: false,
             webSecurity: true,
           },
