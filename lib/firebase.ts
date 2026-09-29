@@ -36,6 +36,7 @@ googleProvider.setCustomParameters({ prompt: "select_account" });
 export const googleDriveProvider = new GoogleAuthProvider();
 googleDriveProvider.setCustomParameters({ prompt: "select_account" });
 googleDriveProvider.addScope("https://www.googleapis.com/auth/drive.file");
+googleDriveProvider.addScope("https://www.googleapis.com/auth/drive.metadata.readonly");
 
 export interface DriveStorageQuota {
   limit: number;
@@ -48,6 +49,9 @@ export interface DriveStorageQuota {
   formattedTotal: string;
   formattedFree: string;
   planName?: string;
+  source?: "live" | "custom" | "default";
+  verifiedAt?: string;
+  accountEmail?: string;
 }
 
 export const formatStorageBytes = (bytes: number): string => {
@@ -76,28 +80,29 @@ export function getDefaultQuotaForEmail(email?: string | null): DriveStorageQuot
       formattedTotal: "5.0 TB",
       formattedFree: "4.98 TB",
       planName: "5 TB Google One Plan",
+      source: "default",
+      accountEmail: "garvkataria1@gmail.com",
     };
   }
 
-  // Default Standard 15 GB Plan for garvkataria1573@gmail.com or other accounts
+  // Baseline standard 15 GB Plan for other unverified accounts
   const limit = 15 * 1024 * 1024 * 1024;
-  const usage = 0.82 * 1024 * 1024 * 1024; // ~820 MB
-  const usageInDrive = 0.35 * 1024 * 1024 * 1024;
-  const usageInPhotos = 0.15 * 1024 * 1024 * 1024;
-  const usageInGmail = 0.32 * 1024 * 1024 * 1024;
-  const free = Math.max(0, limit - usage);
+  const usage = 0;
+  const free = limit;
 
   return {
     limit,
-    usage,
-    usageInDrive,
-    usageInPhotos,
-    usageInGmail,
-    percent: Number(((usage / limit) * 100).toFixed(1)),
-    formattedUsed: formatStorageBytes(usage),
+    usage: 0,
+    usageInDrive: 0,
+    usageInPhotos: 0,
+    usageInGmail: 0,
+    percent: 0,
+    formattedUsed: "0 MB",
     formattedTotal: "15.0 GB",
-    formattedFree: formatStorageBytes(free),
-    planName: "15 GB Google Account",
+    formattedFree: "15.0 GB",
+    planName: "15 GB Google Drive Storage",
+    source: "default",
+    accountEmail: clean || undefined,
   };
 }
 
@@ -134,6 +139,9 @@ export async function fetchDriveQuota(accessToken: string): Promise<DriveStorage
       ? `${(limit / (1024 * 1024 * 1024 * 1024)).toFixed(1)} TB Google One`
       : `${(limit / (1024 * 1024 * 1024)).toFixed(0)} GB Google Drive`;
 
+    const verifiedAt = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const accountEmail = data.user?.emailAddress || undefined;
+
     return {
       limit,
       usage,
@@ -145,6 +153,9 @@ export async function fetchDriveQuota(accessToken: string): Promise<DriveStorage
       formattedTotal: formatStorageBytes(limit),
       formattedFree: formatStorageBytes(free),
       planName,
+      source: "live",
+      verifiedAt,
+      accountEmail,
     };
   } catch (err) {
     console.error("Failed to fetch drive quota:", err);
@@ -176,19 +187,16 @@ export function getGDriveAuth() {
 }
 
 /**
- * Connect Google Drive via popup without modifying the primary application session.
+ * Connect Google Drive via popup with Drive permissions without modifying the primary application session.
  */
 export async function connectGoogleDrive(): Promise<{ user: User; accessToken: string | null }> {
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    return {
-      user: result.user,
-      accessToken: credential?.accessToken ?? null,
-    };
-  } catch (err) {
-    throw err;
-  }
+  const gAuth = getGDriveAuth();
+  const result = await signInWithPopup(gAuth, googleDriveProvider);
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  return {
+    user: result.user,
+    accessToken: credential?.accessToken ?? null,
+  };
 }
 
 /**

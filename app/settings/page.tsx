@@ -376,8 +376,12 @@ export default function SettingsPage() {
             const cachedQuota = localStorage.getItem(`gdrive_quota_${acc.email}`);
             if (cachedQuota) {
               const parsed = JSON.parse(cachedQuota);
-              // Clean up stale 5.0 TB default that was accidentally attached to other accounts
-              if (
+              // Clean up stale mock default (839.7 MB) or 5.0 TB attached to wrong accounts
+              if (parsed.formattedUsed === "839.7 MB") {
+                const defQ = getDefaultQuotaForEmail(acc.email);
+                setQuota(defQ);
+                localStorage.setItem(`gdrive_quota_${acc.email}`, JSON.stringify(defQ));
+              } else if (
                 acc.email.toLowerCase() !== "garvkataria1@gmail.com" &&
                 parsed.formattedTotal === "5.0 TB"
               ) {
@@ -468,6 +472,9 @@ export default function SettingsPage() {
       formattedTotal: formatStorageBytes(limit),
       formattedFree: formatStorageBytes(free),
       planName: planUnit === "TB" ? `${planVal} TB Google One Cloud` : `${planVal} GB Google Storage`,
+      source: "custom",
+      verifiedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      accountEmail: googleAccount?.email || undefined,
     };
 
     setQuota(updated);
@@ -509,6 +516,7 @@ export default function SettingsPage() {
       setGoogleLoading(true);
       setBackupError("");
       setBackupSuccess("");
+      setVerificationResult(null);
       const { user, accessToken } = await connectGoogleDrive();
       const acc = { email: user.email, displayName: user.displayName };
       setGoogleAccount(acc);
@@ -522,9 +530,6 @@ export default function SettingsPage() {
         setDriveAccessToken(accessToken);
       }
 
-      const initialQ = getDefaultQuotaForEmail(user.email);
-      setQuota(initialQ);
-
       if (accessToken) {
         setQuotaLoading(true);
         const q = await fetchDriveQuota(accessToken);
@@ -533,27 +538,85 @@ export default function SettingsPage() {
           if (user.email && typeof window !== "undefined") {
             localStorage.setItem(`gdrive_quota_${user.email}`, JSON.stringify(q));
           }
+          setBackupSuccess(`Google Drive connected & verified! Real-time storage synced for ${user.email}.`);
+        } else {
+          const initialQ = getDefaultQuotaForEmail(user.email);
+          setQuota(initialQ);
+          setBackupSuccess(`Google Drive connected: ${user.email}`);
         }
         setQuotaLoading(false);
+      } else {
+        const initialQ = getDefaultQuotaForEmail(user.email);
+        setQuota(initialQ);
+        setBackupSuccess(`Google Drive connected: ${user.email}`);
       }
-      setBackupSuccess(`Google Drive connected: ${user.email}`);
-    } catch {
-      // In Desktop Electron or when Windows Hello / popup is interrupted:
-      // Gracefully link user's account without showing red interruption alert!
-      const targetEmail = manualGoogleEmail.trim() || "garvkataria1573@gmail.com";
-      const acc = { email: targetEmail, displayName: "Garv Kataria" };
-      const initialQ = getDefaultQuotaForEmail(targetEmail);
-      setGoogleAccount(acc);
-      setQuota(initialQ);
-      if (typeof window !== "undefined") {
-        localStorage.setItem("fc_gdrive_account", JSON.stringify(acc));
-        localStorage.setItem(`gdrive_quota_${acc.email}`, JSON.stringify(initialQ));
+    } catch (err: any) {
+      console.error("Google Drive connection error:", err);
+      const code = err?.code || "";
+      if (code === "auth/popup-closed-by-user") {
+        setBackupError("Google Sign-In popup was closed before finishing. If a Windows PIN / Passkey prompt appeared, please complete it or try again.");
+      } else if (code === "auth/popup-blocked") {
+        setBackupError("Sign-in popup was blocked by your browser. Please allow popups for this site and try again.");
+      } else if (code === "auth/cancelled-popup-request") {
+        setBackupError("Sign-in request was cancelled. Please try again.");
+      } else {
+        setBackupError(`Google Drive sign-in error: ${err?.message || "Could not complete authorization."}`);
       }
-      setBackupSuccess(`Google Drive connected: ${targetEmail} (${initialQ.planName})`);
-      setBackupError("");
     } finally {
       setGoogleLoading(false);
       setQuotaLoading(false);
+    }
+  };
+
+  const [verifying, setVerifying] = useState(false);
+  const [verificationResult, setVerificationResult] = useState<{
+    status: "success" | "warning" | "error";
+    message: string;
+    details?: string;
+  } | null>(null);
+
+  const handleVerifyConnection = async () => {
+    try {
+      setVerifying(true);
+      setVerificationResult(null);
+      setBackupError("");
+      const token = driveAccessToken || (typeof window !== "undefined" ? sessionStorage.getItem("fc_gdrive_access_token") : null);
+      if (!token) {
+        setVerificationResult({
+          status: "warning",
+          message: "No active Google OAuth token found.",
+          details: "Click 'Sign in with Google' above to authorize live real-time access to Google Drive API.",
+        });
+        return;
+      }
+
+      const q = await fetchDriveQuota(token);
+      if (q) {
+        setQuota(q);
+        if (googleAccount?.email && typeof window !== "undefined") {
+          localStorage.setItem(`gdrive_quota_${googleAccount.email}`, JSON.stringify(q));
+        }
+        setVerificationResult({
+          status: "success",
+          message: "100% Live Connection Verified with Google Drive API!",
+          details: `Account: ${q.accountEmail || googleAccount?.email} | Real Quota: ${q.formattedUsed} used of ${q.formattedTotal} (${q.percent}%). Verified at ${q.verifiedAt || new Date().toLocaleTimeString()}.`,
+        });
+        setBackupSuccess(`Google Drive live connection verified for ${q.accountEmail || googleAccount?.email}!`);
+      } else {
+        setVerificationResult({
+          status: "error",
+          message: "Connection check failed: Google Drive API returned 401/403.",
+          details: "Your Google session token has expired or is missing Drive permissions. Please click 'Re-authorize Drive' to refresh it.",
+        });
+      }
+    } catch (err: any) {
+      setVerificationResult({
+        status: "error",
+        message: "Failed to communicate with Google Drive API.",
+        details: err?.message || "Network error. Please check your internet connection.",
+      });
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -568,6 +631,7 @@ export default function SettingsPage() {
         sessionStorage.removeItem("fc_gdrive_access_token");
       }
       setDriveAccessToken(null);
+      setVerificationResult(null);
       setDriveBackupState({ status: "idle", step: "" });
       await disconnectGoogleDrive();
       setGoogleAccount(null);
@@ -900,10 +964,23 @@ export default function SettingsPage() {
                         {/* Storage Indicator & Progress Bar */}
                         <div className="rounded-lg border border-[#e0eaf6] bg-[#f8fbff] p-3.5 space-y-2.5">
                           <div className="flex items-center justify-between text-xs font-semibold text-[#071333]">
-                            <span className="flex items-center gap-1.5 font-bold">
+                            <div className="flex items-center gap-1.5 font-bold flex-wrap">
                               <HardDrive className="h-4 w-4 text-[#1688f9]" />
-                              {quota?.planName || "Google Drive Storage"}
-                            </span>
+                              <span>{quota?.planName || "Google Drive Storage"}</span>
+                              {quota?.source === "live" ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                  <CheckCircle2 className="h-2.5 w-2.5 text-emerald-600" /> Live API
+                                </span>
+                              ) : quota?.source === "custom" ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-800">
+                                  ✎ User Set
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
+                                  ⚠ Estimated / Unverified
+                                </span>
+                              )}
+                            </div>
                             <span className="text-xs font-extrabold text-[#071333]">
                               {quota?.formattedUsed || "0 MB"} / {quota?.formattedTotal || "15.0 GB"} ({quota ? quota.percent : 0}%)
                             </span>
@@ -957,13 +1034,24 @@ export default function SettingsPage() {
 
                           {/* Plan and Live Links */}
                           <div className="pt-2 border-t border-[#e2edf8] flex items-center justify-between text-[11px]">
-                            <button
-                              type="button"
-                              onClick={toggleQuotaEditor}
-                              className="text-[#1688f9] hover:underline font-semibold"
-                            >
-                              {editingQuota ? "Close Editor" : "Adjust Storage ✎"}
-                            </button>
+                            <div className="flex items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={handleVerifyConnection}
+                                disabled={verifying}
+                                className="text-emerald-700 hover:text-emerald-800 font-bold hover:underline flex items-center gap-1 disabled:opacity-50"
+                              >
+                                {verifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                                {verifying ? "Checking Drive API..." : "Verify Live Connection ⚡"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={toggleQuotaEditor}
+                                className="text-[#1688f9] hover:underline font-semibold"
+                              >
+                                {editingQuota ? "Close Editor" : "Adjust Storage ✎"}
+                              </button>
+                            </div>
                             <a
                               href="https://one.google.com/storage"
                               target="_blank"
@@ -973,6 +1061,60 @@ export default function SettingsPage() {
                               Open Google One ↗
                             </a>
                           </div>
+
+                          {/* Verification Status Feedback Card */}
+                          {verificationResult && (
+                            <div
+                              className={`rounded-lg p-3 text-xs space-y-1.5 border transition-all ${
+                                verificationResult.status === "success"
+                                  ? "bg-emerald-50 border-emerald-200 text-emerald-950"
+                                  : verificationResult.status === "warning"
+                                  ? "bg-amber-50 border-amber-200 text-amber-950"
+                                  : "bg-rose-50 border-rose-200 text-rose-950"
+                              }`}
+                            >
+                              <div className="font-bold flex items-center justify-between">
+                                <span className="flex items-center gap-1.5">
+                                  {verificationResult.status === "success" ? (
+                                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                                  ) : (
+                                    <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                                  )}
+                                  {verificationResult.message}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setVerificationResult(null)}
+                                  className="text-[10px] text-slate-400 hover:text-slate-600 ml-2"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              {verificationResult.details && (
+                                <p className="text-[11px] leading-relaxed text-slate-700 bg-white/70 p-2 rounded border border-black/5">
+                                  {verificationResult.details}
+                                </p>
+                              )}
+                              {verificationResult.status !== "success" && (
+                                <div className="pt-1 flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={handleGoogleConnect}
+                                    className="px-2.5 py-1 rounded bg-[#1688f9] hover:bg-[#1270d1] text-white font-bold text-[11px]"
+                                  >
+                                    Authorize with Google
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={toggleQuotaEditor}
+                                    className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-[11px]"
+                                  >
+                                    Enter Exact Storage Manually
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
 
                           {/* Quick Quota Editor */}
                           {editingQuota ? (
