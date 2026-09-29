@@ -27,7 +27,7 @@ export class IncomeService {
   async list(user: AuthUser, query: Record<string, string>) {
     const timezone = await this.tz(user);
     const page = Number(query.page) || 1;
-    const limit = Math.min(100, Number(query.limit) || 20);
+    const limit = Math.min(2000, Number(query.limit) || 20);
     const where: Prisma.IncomeWhereInput = { businessId: user.businessId };
 
     if (query.category) where.category = query.category as IncomeCategory;

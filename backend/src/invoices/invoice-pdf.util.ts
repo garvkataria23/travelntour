@@ -156,66 +156,92 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
   };
 
   // ----- Header -----
-  doc.setFillColor(23, 78, 116);
+  doc.setFillColor(14, 42, 92); // Deep Navy Travel Branding
   doc.rect(0, 0, pageWidth, 86, 'F');
-  textY(business.name || 'Travel Agency', margin, 40, { size: 20, bold: true, color: [255, 255, 255] });
-  textY('INVOICE', pageWidth - margin, 40, {
-    size: 20,
+  textY(business.name || 'Travel Agency', margin, 36, { size: 18, bold: true, color: [255, 255, 255] });
+  textY('TAX INVOICE', pageWidth - margin, 36, {
+    size: 18,
     bold: true,
     align: 'right',
     color: [255, 255, 255],
   });
   textY(
-    [business.email, business.phone].filter(Boolean).join('  •  ') || '',
+    [business.email, business.phone].filter(Boolean).join('  •  ') || 'Flight Tickets & Holiday Packages',
     margin,
-    58,
-    { size: 9, color: [220, 230, 240] },
+    54,
+    { size: 8.5, color: [210, 225, 245] },
   );
-  textY(`Invoice # ${booking.invoiceNumber || '—'}`, pageWidth - margin, 58, {
+  textY(`Invoice # ${booking.invoiceNumber || '—'}`, pageWidth - margin, 54, {
     size: 11,
     bold: true,
     align: 'right',
     color: [255, 255, 255],
   });
 
+  // Status badge in header
+  const isPaid = booking.paymentStatus === 'PAID';
+  const isPartial = booking.paymentStatus === 'PARTIAL';
+  const statusLabel = isPaid ? 'PAID IN FULL' : isPartial ? 'PARTIALLY PAID' : 'PAYMENT DUE';
+  const statusBadgeColor: [number, number, number] = isPaid ? [0, 180, 90] : isPartial ? [56, 140, 255] : [255, 170, 40];
+  textY(`Status: ${statusLabel}`, pageWidth - margin, 70, {
+    size: 8.5,
+    bold: true,
+    align: 'right',
+    color: statusBadgeColor,
+  });
+
   // ----- Meta rows -----
-  let y = 112;
-  textY('Bill To', margin, y);
-  textY(customer.name, margin, y + 18, { size: 12, bold: true });
-  textY(customer.phone, margin, y + 34, { size: 9 });
-  if (customer.email) textY(customer.email, margin, y + 48, { size: 9 });
+  let y = 104;
+  textY('BILL TO / PASSENGER', margin, y, { size: 8, bold: true, color: [120, 128, 140] });
+  textY(customer.name, margin, y + 16, { size: 11, bold: true });
+  textY(customer.phone, margin, y + 30, { size: 8.5 });
+  if (customer.email) textY(customer.email, margin, y + 42, { size: 8.5 });
+
+  const fromDisplay = booking.fromAirport
+    ? `${booking.fromAirport} (${titleCase(booking.fromCity)})`
+    : titleCase(booking.fromCity);
+  const toDisplay = booking.toAirport
+    ? `${booking.toAirport} (${titleCase(booking.toCity)})`
+    : titleCase(booking.toCity);
 
   const metaRight: Array<[string, string]> = [
     ['Invoice Number', booking.invoiceNumber || '—'],
     ['Invoice Date', dateFmt(booking.invoiceIssuedAt || booking.createdAt)],
     ['Booking PNR', booking.pnr],
-    ['Flight', `${booking.airline} ${booking.flightNumber}`],
-    ['Route', `${titleCase(booking.fromCity)} → ${titleCase(booking.toCity)}`],
-    ['Departure', `${dateFmt(booking.departureDate)} ${booking.departureTime}`],
+    ['Airline & Flight', `${booking.airline} ${booking.flightNumber}`.trim()],
+    ['Sector / Route', `${fromDisplay} → ${toDisplay}`],
+    ['Departure', `${dateFmt(booking.departureDate)} ${booking.departureTime || ''}`.trim()],
   ];
-  let metaY = 112;
+  if (booking.terminal) {
+    metaRight.push(['Terminal', booking.terminal]);
+  }
+  if (booking.referenceNumber) {
+    metaRight.push(['Booking Ref', booking.referenceNumber]);
+  }
+
+  let metaY = 104;
   for (const [label, value] of metaRight) {
-    textY(label, pageWidth - margin - 150, metaY, { size: 8, color: [120, 128, 140] });
-    textY(value, pageWidth - margin - 10, metaY, { size: 9, align: 'right' });
-    metaY += 16;
+    textY(label, pageWidth - margin - 170, metaY, { size: 7.5, color: [120, 128, 140] });
+    textY(value, pageWidth - margin, metaY, { size: 8.5, align: 'right' });
+    metaY += 14;
   }
 
   // ----- Items table -----
-  y = 220;
-  doc.setFillColor(240, 244, 248);
-  doc.rect(margin, y - 14, contentWidth, 22, 'F');
+  y = Math.max(metaY + 14, 214);
+  doc.setFillColor(240, 245, 252);
+  doc.rect(margin, y - 13, contentWidth, 20, 'F');
   const cols: Array<{ label: string; x: number; w: number }> = [
-    { label: 'DESCRIPTION', x: margin, w: contentWidth * 0.5 },
+    { label: 'DESCRIPTION / SERVICE', x: margin, w: contentWidth * 0.5 },
     { label: 'QTY', x: margin + contentWidth * 0.5, w: contentWidth * 0.12 },
     { label: 'UNIT PRICE', x: margin + contentWidth * 0.62, w: contentWidth * 0.19 },
     { label: 'AMOUNT', x: margin + contentWidth * 0.81, w: contentWidth * 0.19 },
   ];
   for (const col of cols) {
-    textY(col.label, col.x + (col.label === 'DESCRIPTION' ? 0 : 12), y, {
-      size: 8,
+    textY(col.label, col.x + (col.label === 'DESCRIPTION / SERVICE' ? 0 : 12), y, {
+      size: 7.5,
       bold: true,
-      color: [90, 98, 110],
-      align: col.label === 'DESCRIPTION' ? 'left' : 'right',
+      color: [70, 85, 110],
+      align: col.label === 'DESCRIPTION / SERVICE' ? 'left' : 'right',
     });
   }
 
@@ -229,115 +255,125 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
         }))
       : [
           {
-            description: 'Flight ticket',
+            description: `Air Ticket: ${fromDisplay} → ${toDisplay} (${booking.airline})`,
             quantity: 1,
             unitPrice: booking.baseFare ?? booking.amount ?? 0,
             amount: booking.baseFare ?? booking.amount ?? 0,
           },
         ];
 
-  let rowY = y + 20;
+  let rowY = y + 18;
   rows.forEach((item, index) => {
-    if (rowY > 680) return;
-    textY(item.description, margin, rowY, { size: 10 });
-    textY(String(item.quantity), cols[1].x + 12, rowY, { size: 10, align: 'right' });
-    textY(fmt(item.unitPrice, currency), cols[2].x + 12, rowY, { size: 10, align: 'right' });
-    textY(fmt(item.amount, currency), cols[3].x + 12, rowY, { size: 10, align: 'right' });
+    if (rowY > 660) return;
+    textY(item.description, margin, rowY, { size: 9 });
+    textY(String(item.quantity), cols[1].x + 12, rowY, { size: 9, align: 'right' });
+    textY(fmt(item.unitPrice, currency), cols[2].x + 12, rowY, { size: 9, align: 'right' });
+    textY(fmt(item.amount, currency), cols[3].x + 12, rowY, { size: 9, align: 'right' });
     if (index < rows.length - 1) {
-      doc.setDrawColor(232, 236, 240);
-      doc.line(margin, rowY + 10, pageWidth - margin, rowY + 10);
+      doc.setDrawColor(235, 240, 246);
+      doc.line(margin, rowY + 9, pageWidth - margin, rowY + 9);
     }
-    rowY += 26;
+    rowY += 23;
   });
 
   // ----- Totals -----
-  let totalsY = Math.min(Math.max(rowY + 8, 300), 620);
+  let totalsY = Math.min(Math.max(rowY + 10, 300), 610);
   const taxLabel = (setting?.taxLabel || 'GST').toUpperCase();
   const totalRows: Array<[string, string]> = [
     ['Subtotal', fmt(subtotal, currency)],
-    ['Discount', `- ${fmt(discount, currency)}`],
-    [`Tax (${taxLabel})`, fmt(taxAmount, currency)],
   ];
-  for (const [label, value] of totalRows) {
-    textY(label, contentWidth * 0.55 + margin, totalsY, { size: 9, color: [90, 98, 110] });
-    textY(value, pageWidth - margin, totalsY, { size: 10, align: 'right' });
-    totalsY += 18;
+  if (discount > 0) {
+    totalRows.push(['Discount', `- ${fmt(discount, currency)}`]);
   }
-  doc.setDrawColor(23, 78, 116);
-  doc.setLineWidth(1.2);
-  doc.line(contentWidth * 0.55 + margin, totalsY - 4, pageWidth - margin, totalsY - 4);
-  textY('TOTAL', contentWidth * 0.55 + margin, totalsY + 14, { size: 12, bold: true });
-  textY(fmt(total, currency), pageWidth - margin, totalsY + 14, { size: 13, bold: true, align: 'right' });
+  if (taxAmount > 0 || setting?.gstRate) {
+    totalRows.push([`Tax (${taxLabel})`, fmt(taxAmount, currency)]);
+  }
+
+  for (const [label, value] of totalRows) {
+    textY(label, contentWidth * 0.55 + margin, totalsY, { size: 8.5, color: [90, 98, 110] });
+    textY(value, pageWidth - margin, totalsY, { size: 9, align: 'right' });
+    totalsY += 16;
+  }
+
+  doc.setFillColor(14, 42, 92);
+  doc.rect(contentWidth * 0.55 + margin, totalsY, contentWidth * 0.45, 26, 'F');
+  textY('TOTAL PAYABLE', contentWidth * 0.55 + margin + 8, totalsY + 17, { size: 10, bold: true, color: [255, 255, 255] });
+  textY(fmt(total, currency), pageWidth - margin - 8, totalsY + 17, { size: 12, bold: true, align: 'right', color: [255, 255, 255] });
 
   const paid = Math.min(paidAmount || 0, total);
   const due = Math.max(0, total - paid);
-  textY(`Paid: ${fmt(paid, currency)}`, contentWidth * 0.55 + margin, totalsY + 32, { size: 9 });
-  textY(`Amount Due: ${fmt(due, currency)}`, pageWidth - margin, totalsY + 32, {
-    size: 9,
+  totalsY += 34;
+  textY(`Paid: ${fmt(paid, currency)}`, contentWidth * 0.55 + margin, totalsY, { size: 9, color: [0, 140, 70], bold: true });
+  textY(`Amount Due: ${due > 0 ? fmt(due, currency) : 'NIL (PAID)'}`, pageWidth - margin, totalsY, {
+    size: 9.5,
     align: 'right',
     bold: true,
+    color: due > 0 ? [210, 39, 79] : [0, 140, 70],
   });
 
-  // ----- Payment status badge -----
-  doc.setFillColor(240, 245, 250);
-  doc.roundedRect(margin, totalsY, 160, 24, 3, 3, 'F');
-  textY(`Payment Status: ${booking.paymentStatus}`, margin + 8, totalsY + 15, {
-    size: 9,
+  // ----- Payment Status Box (Left of totals) -----
+  doc.setFillColor(245, 248, 252);
+  doc.roundedRect(margin, totalsY - 48, 170, 24, 3, 3, 'F');
+  textY(`Payment Status: ${booking.paymentStatus}`, margin + 8, totalsY - 32, {
+    size: 8.5,
     bold: true,
-    color: booking.paymentStatus === 'PAID' ? [0, 164, 81] : booking.paymentStatus === 'PARTIAL' ? [9, 121, 238] : [251, 133, 0],
+    color: isPaid ? [0, 140, 70] : isPartial ? [9, 121, 238] : [210, 120, 0],
   });
 
-  // ----- Bank & Payment Instructions -----
+  // ----- Bank & Wire Transfer Instructions -----
   const hasBankDetails = Boolean(
     setting?.bankName || setting?.bankAccountNumber || setting?.bankUpiId || setting?.bankIfscSwift,
   );
   if (hasBankDetails) {
-    let bY = totalsY + 36;
-    textY('PAYMENT DETAILS', margin, bY, { size: 8, bold: true, color: [90, 98, 110] });
-    bY += 12;
+    let bY = totalsY + 18;
+    doc.setFillColor(247, 250, 254);
+    doc.setDrawColor(220, 232, 245);
+    doc.roundedRect(margin, bY, contentWidth, 54, 3, 3, 'FD');
+
+    textY('BANK PAYMENT INSTRUCTIONS', margin + 10, bY + 12, { size: 7.5, bold: true, color: [14, 42, 92] });
+
+    let bLineY = bY + 26;
     if (setting?.bankName) {
-      textY(`Bank: ${toLatin1(setting.bankName)}`, margin, bY, { size: 8 });
-      bY += 11;
+      textY(`Bank: ${toLatin1(setting.bankName)}`, margin + 10, bLineY, { size: 8 });
     }
     if (setting?.bankAccountName) {
-      textY(`A/C Name: ${toLatin1(setting.bankAccountName)}`, margin, bY, { size: 8 });
-      bY += 11;
+      textY(`A/C Name: ${toLatin1(setting.bankAccountName)}`, margin + 10, bLineY + 12, { size: 8 });
     }
     if (setting?.bankAccountNumber) {
-      textY(`A/C / IBAN: ${toLatin1(setting.bankAccountNumber)}`, margin, bY, { size: 8, bold: true });
-      bY += 11;
+      textY(`A/C or IBAN: ${toLatin1(setting.bankAccountNumber)}`, margin + contentWidth * 0.45, bLineY, { size: 8, bold: true });
     }
     if (setting?.bankIfscSwift) {
-      textY(`IFSC / SWIFT: ${toLatin1(setting.bankIfscSwift)}`, margin, bY, { size: 8 });
-      bY += 11;
+      textY(`IFSC / SWIFT: ${toLatin1(setting.bankIfscSwift)}`, margin + contentWidth * 0.45, bLineY + 12, { size: 8 });
     }
     if (setting?.bankUpiId) {
-      textY(`UPI: ${toLatin1(setting.bankUpiId)}`, margin, bY, { size: 8 });
+      textY(`UPI / VPA: ${toLatin1(setting.bankUpiId)}`, margin + contentWidth * 0.75, bLineY, { size: 8, bold: true, color: [22, 136, 249] });
     }
   }
 
-  // ----- Terms & Notes -----
+  // ----- Travel Terms & Notes -----
   const footerY = 792;
-  let notesY = footerY - 50;
-  if (setting?.invoiceTerms) {
-    textY(`Terms: ${toLatin1(setting.invoiceTerms)}`, margin, notesY, { size: 7.5, color: [120, 128, 140] });
-    notesY += 11;
-  }
+  let notesY = footerY - 52;
+  const defaultTerms =
+    'Report at check-in 3 hrs prior for intl & 2 hrs for domestic. Valid passport / Govt ID required. Airline fare & cancellation rules apply.';
+  const effectiveTerms = setting?.invoiceTerms ? toLatin1(setting.invoiceTerms) : defaultTerms;
+
+  textY(`Terms: ${effectiveTerms}`, margin, notesY, { size: 7, color: [110, 120, 135] });
   if (setting?.invoiceNotes) {
-    textY(`Note: ${toLatin1(setting.invoiceNotes)}`, margin, notesY, { size: 7.5, color: [120, 128, 140] });
+    notesY += 11;
+    textY(`Note: ${toLatin1(setting.invoiceNotes)}`, margin, notesY, { size: 7, color: [110, 120, 135] });
   }
 
   // ----- Footer -----
-  doc.setDrawColor(200, 208, 216);
-  doc.line(margin, footerY - 24, pageWidth - margin, footerY - 24);
+  doc.setDrawColor(210, 220, 230);
+  doc.line(margin, footerY - 20, pageWidth - margin, footerY - 20);
   if (setting?.gstin) {
-    textY(`${taxLabel}IN: ${setting.gstin}`, margin, footerY - 8, { size: 8, color: [120, 128, 140] });
+    textY(`${taxLabel} Reg: ${setting.gstin}`, margin, footerY - 6, { size: 7.5, color: [120, 128, 140] });
   }
   textY(
-    `Generated by ${business.name || 'Travel Agency'} • ${new Intl.DateTimeFormat('en-IN').format(generatedAt)}`,
+    `Computer generated invoice • ${business.name || 'Travel Agency'} • ${dateFmt(generatedAt)}`,
     pageWidth - margin,
-    footerY - 8,
-    { size: 8, color: [120, 128, 140], align: 'right' },
+    footerY - 6,
+    { size: 7.5, color: [120, 128, 140], align: 'right' },
   );
 
   const buffer = Buffer.from(doc.output('arraybuffer'));

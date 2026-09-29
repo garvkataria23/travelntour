@@ -1,11 +1,13 @@
-﻿"use client";
+"use client";
 
 import { AppShell } from "@/components/dashboard/app-shell";
 import { StatCard } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatCurrency, formatDate } from "@/lib/api";
 import { useDisplayCurrency } from "@/lib/currency";
-import { CalendarDays, Download, MessageCircle, Plane, TrendingDown, TrendingUp, Users, X } from "lucide-react";
+import { CalendarDays, Download, FileSpreadsheet, MessageCircle, Plane, TrendingDown, TrendingUp, Users, X } from "lucide-react";
+import { generateFinancialReportExcel } from "@/lib/financial-excel";
+import { triggerFileDownload } from "@/lib/backup-export";
 import { useMemo, useState } from "react";
 
 interface TrendPoint { date: string; count: number }
@@ -15,7 +17,11 @@ interface MonthBucket { month: string; revenue: number; count: number }
 interface RevenueReport { totalRevenue: number; currency: string; byMonth: MonthBucket[] }
 interface OverviewStats {
   stats: {
+    totalBookings?: number;
     revenue: number;
+    manualIncome?: number;
+    totalIncome?: number;
+    ticketCost?: number;
     directCost: number;
     operatingCost: number;
     grossProfit: number;
@@ -137,22 +143,112 @@ export default function ReportsPage() {
     setExporting(true);
     setExportError("");
     try {
-      const listParams = new URLSearchParams();
-      if (from) listParams.set("from", from);
-      if (to) listParams.set("to", to);
-      listParams.set("page", "1");
-      listParams.set("limit", "1000");
-      const data = await api<BookingExportList>(`/bookings?${listParams.toString()}`);
-      const rows = (data.items ?? []).map((b) => [
-        formatDate(b.departureDate ?? ""),
-        b.pnr ?? "",
-        b.customer?.name ?? "",
-        `${b.fromAirport || "—"} → ${b.toAirport || "—"}`,
-        formatCurrency(b.amount ?? 0, revenueRep.data?.currency),
-        STATUS_LABELS[b.status ?? ""] ?? (b.status ?? ""),
-        SOURCE_LABELS[b.source ?? ""] ?? (b.source ?? ""),
+      const qParams = new URLSearchParams();
+      if (from) qParams.set("from", from);
+      if (to) qParams.set("to", to);
+      qParams.set("page", "1");
+      qParams.set("limit", "1000");
+
+      const [bookingsRes, invoicesRes, expensesRes, incomeRes] = await Promise.all([
+        api<BookingExportList>(`/bookings?${qParams.toString()}`).catch(() => ({ items: [] })),
+        api<{ items: any[]; stats?: any }>(`/invoices?${qParams.toString()}`).catch(() => ({ items: [] })),
+        api<{ items: any[] }>(`/expenses?${qParams.toString()}`).catch(() => ({ items: [] })),
+        api<{ items: any[] }>(`/income?${qParams.toString()}`).catch(() => ({ items: [] })),
       ]);
-      downloadCsv("reports-bookings.csv", [["Date", "PNR", "Customer", "Route", "Amount", "Status", "Source"], ...rows]);
+
+      const ov = overviewRep.data?.stats;
+      const invStats = invoicesRep.data;
+      const curr = revenueRep.data?.currency || "AED";
+
+      const excelBlob = generateFinancialReportExcel({
+        businessName: "FlyConnect Travel Agency",
+        currency: curr,
+        from: from || undefined,
+        to: to || undefined,
+        stats: {
+          totalBookings: bookingsRep.data?.total ?? bookingsRes.items?.length ?? 0,
+          revenue: ov?.revenue ?? revenueRep.data?.totalRevenue ?? 0,
+          manualIncome: ov?.manualIncome ?? 0,
+          totalIncome: ov?.totalIncome ?? ((ov?.revenue ?? 0) + (ov?.manualIncome ?? 0)),
+          ticketCost: ov?.ticketCost ?? 0,
+          directCost: ov?.directCost ?? expensesRep.data?.directCost ?? 0,
+          operatingCost: ov?.operatingCost ?? expensesRep.data?.operatingCost ?? 0,
+          grossProfit: ov?.grossProfit ?? 0,
+          netProfit: ov?.netProfit ?? 0,
+          invoiced: invStats?.billed ?? 0,
+          collected: invStats?.collected ?? 0,
+          outstanding: invStats?.outstanding ?? 0,
+        },
+        bookings: (bookingsRes.items ?? []).map((b: any) => ({
+          id: b.id || "",
+          pnr: b.pnr || "",
+          customerName: b.customer?.name || "",
+          airline: b.airline || "",
+          flightNumber: b.flightNumber || "",
+          fromAirport: b.fromAirport || "",
+          toAirport: b.toAirport || "",
+          departureDate: b.departureDate || "",
+          status: b.status || "",
+          source: b.source || "DIRECT",
+          amount: Number(b.amount || 0),
+          cost: Number(b.cost || 0),
+          currency: b.currency || curr,
+          createdAt: b.createdAt || "",
+          paymentStatus: b.paymentStatus || "",
+        })),
+        invoices: (invoicesRes.items ?? []).map((inv: any) => ({
+          invoiceNumber: inv.invoiceNumber || "",
+          invoiceIssuedAt: inv.invoiceIssuedAt || "",
+          customerName: inv.customerName || "",
+          customerPhone: inv.customerPhone || "",
+          customerEmail: inv.customerEmail || "",
+          pnr: inv.pnr || "",
+          airline: inv.airline || "",
+          flightNumber: inv.flightNumber || "",
+          route: inv.fromCity && inv.toCity ? `${inv.fromCity} → ${inv.toCity}` : "",
+          departureDate: inv.departureDate || "",
+          currency: inv.currency || curr,
+          subtotal: Number(inv.subtotal || 0),
+          discount: Number(inv.discount || 0),
+          taxRate: Number(inv.taxRate || 0),
+          taxAmount: Number(inv.taxAmount || 0),
+          total: Number(inv.total || 0),
+          paidAmount: Number(inv.paidAmount || 0),
+          due: Number(inv.due || 0),
+          paymentStatus: inv.paymentStatus || "UNPAID",
+        })),
+        expenses: (expensesRes.items ?? []).map((e: any) => ({
+          id: e.id || "",
+          category: e.category || "OPERATING",
+          title: e.title || "",
+          amount: Number(e.amount || 0),
+          currency: e.currency || curr,
+          payableTo: e.payableTo,
+          description: e.description,
+          incurredOn: e.incurredOn || "",
+        })),
+        income: (incomeRes.items ?? []).map((inc: any) => ({
+          id: inc.id || "",
+          category: inc.category || "OTHER",
+          title: inc.title || "",
+          amount: Number(inc.amount || 0),
+          currency: inc.currency || curr,
+          reference: inc.reference,
+          note: inc.note,
+          receivedOn: inc.receivedOn || "",
+        })),
+        customers: (customersRep.data?.top ?? []).map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          phone: c.phone,
+          bookingsCount: c.bookings || 0,
+          totalSpent: 0,
+          totalDue: 0,
+        })),
+      });
+
+      const dateSuffix = from || to ? `${from || "start"}_to_${to || "end"}` : new Date().toISOString().slice(0, 10);
+      triggerFileDownload(excelBlob, `FlyConnect_Executive_Financial_Report_${dateSuffix}.xlsx`);
     } catch (err) {
       setExportError(err instanceof Error ? err.message : "Unable to export report");
     } finally {
@@ -191,7 +287,7 @@ export default function ReportsPage() {
             ) : (
               <span className="flex h-11 items-center gap-2 rounded-lg border border-[#d6e1ef] bg-[#f8fbff] px-4 text-sm font-semibold text-[#596782]"><CalendarDays className="h-4 w-4" />All time</span>
             )}
-            <button onClick={exportReport} disabled={exporting} className="flex h-11 items-center gap-2 rounded-lg bg-[#1688f9] px-6 font-bold text-white disabled:opacity-60"><Download className="h-4 w-4" />{exporting ? "Exporting..." : "Export Report"}</button>
+            <button onClick={exportReport} disabled={exporting} className="flex h-11 items-center gap-2 rounded-lg bg-[#1688f9] px-6 font-bold text-white disabled:opacity-60 shadow-sm"><FileSpreadsheet className="h-4 w-4" />{exporting ? "Generating Excel..." : "Export Financial Excel (.xlsx)"}</button>
           </div>
         </div>
 

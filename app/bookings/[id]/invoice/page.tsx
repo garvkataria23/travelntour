@@ -36,6 +36,7 @@ interface InvoiceData {
   toCity: string | null;
   departureDate: string;
   departureTime: string | null;
+  terminal?: string | null;
   amount: number | null;
   currency: string | null;
   baseFare: number | null;
@@ -227,7 +228,9 @@ function InvoicePaper({ invoice: b, settings }: { invoice: InvoiceData; settings
   const currency = b.currency ?? base;
 
   const items = b.items.length > 0 ? b.items.map((i) => ({ description: i.description, amount: i.amount })) : [{ description: "Flight ticket", amount: b.baseFare ?? 0 }];
-  const route = `${b.fromCity || "—"} to ${b.toCity || "—"}`;
+  const fromDisplay = b.fromAirport ? `${b.fromAirport} (${b.fromCity || "—"})` : (b.fromCity || "—");
+  const toDisplay = b.toAirport ? `${b.toAirport} (${b.toCity || "—"})` : (b.toCity || "—");
+  const route = `${fromDisplay} → ${toDisplay}`;
   const issuedOn = b.invoiceIssuedAt ? formatInvoiceDate(b.invoiceIssuedAt) : null;
 
   return (
@@ -242,27 +245,31 @@ function InvoicePaper({ invoice: b, settings }: { invoice: InvoiceData; settings
           </div>
         </div>
         <div className="text-right">
-          <p className="text-sm font-bold uppercase tracking-[0.14em] text-[#1688f9]">Tax Invoice</p>
+          <p className="text-sm font-bold uppercase tracking-[0.14em] text-[#1688f9]">Tax Invoice &amp; Travel Voucher</p>
           <p className="mt-2 font-extrabold text-[#0e2a5c]">{b.invoiceNumber ?? "Invoice not issued"}</p>
-          <p className="text-sm text-[#65728a]">{issuedOn ? `Issued ${issuedOn}` : "Not printed yet"}</p>
+          <div className="mt-1 flex items-center justify-end gap-2">
+            <PaymentStatusBadge value={b.paymentStatus} />
+            <p className="text-xs text-[#65728a]">{issuedOn ? `Issued ${issuedOn}` : "Draft"}</p>
+          </div>
         </div>
       </div>
 
       <div className="border-y border-[#e5edf6] bg-[#f7fafd] px-10 py-6">
         <div className="grid gap-6 sm:grid-cols-3">
-          <InvoiceBlock label="Billed To">
+          <InvoiceBlock label="Billed To / Passenger">
             <p className="font-bold text-[#0e2a5c]">{b.customerName ?? "—"}</p>
             <p className="text-sm text-[#65728a]">{b.customerPhone ?? ""}</p>
             <p className="text-sm text-[#65728a]">{b.customerEmail ?? ""}</p>
           </InvoiceBlock>
-          <InvoiceBlock label="Journey">
+          <InvoiceBlock label="Flight &amp; Sector">
             <p className="font-bold text-[#0e2a5c]">{route}</p>
-            <p className="text-sm text-[#65728a]">{b.fromCity || "—"}</p>
-          </InvoiceBlock>
-          <InvoiceBlock label="Ticket">
-            <p className="font-bold text-[#0e2a5c]">PNR {b.pnr}</p>
             <p className="text-sm text-[#65728a]">{`${b.airline ?? ""} ${b.flightNumber ?? ""}`.trim() || "—"}</p>
+          </InvoiceBlock>
+          <InvoiceBlock label="Journey Details">
+            <p className="font-bold text-[#0e2a5c]">PNR: {b.pnr}</p>
             <p className="text-sm text-[#65728a]">{formatInvoiceDate(b.departureDate)}{b.departureTime ? ` · ${b.departureTime}` : ""}</p>
+            {b.terminal ? <p className="text-xs font-semibold text-[#1688f9]">Terminal {b.terminal}</p> : null}
+            {b.referenceNumber ? <p className="text-xs text-[#8a97ad]">Ref: {b.referenceNumber}</p> : null}
           </InvoiceBlock>
         </div>
       </div>
@@ -311,12 +318,12 @@ function InvoicePaper({ invoice: b, settings }: { invoice: InvoiceData; settings
           </div>
         )}
 
-        {prefs?.invoiceTerms && (
-          <p className="mt-4 text-xs leading-5 text-[#65728a]"><span className="font-bold text-[#071333]">Terms: </span>{prefs.invoiceTerms}</p>
-        )}
-        {prefs?.invoiceNotes && (
-          <p className="mt-1 text-xs leading-5 text-[#65728a]"><span className="font-bold text-[#071333]">Note: </span>{prefs.invoiceNotes}</p>
-        )}
+        <div className="mt-4 rounded-xl border border-[#e2edf8] bg-[#f8fbff] p-4 text-xs leading-5 text-[#65728a]">
+          <p><span className="font-bold text-[#071333]">Travel Guidelines &amp; Terms: </span>{prefs?.invoiceTerms || "Please report at airport check-in at least 3 hours prior for international and 2 hours for domestic flights. Valid passport (min 6 months validity) or Govt ID required. Airline fare rules and cancellation policies apply."}</p>
+          {prefs?.invoiceNotes && (
+            <p className="mt-2 border-t border-[#e2edf8] pt-2"><span className="font-bold text-[#071333]">Special Note: </span>{prefs.invoiceNotes}</p>
+          )}
+        </div>
 
         <div className="mt-8 flex items-start justify-between gap-6 border-t border-[#e5edf6] pt-6">
           <p className="max-w-[340px] text-xs leading-5 text-[#8a97ad]">This is a computer generated invoice. Please verify all details before making any payment. For queries contact {business?.name ?? "us"} on {business?.phone ?? "your booked number"}.</p>

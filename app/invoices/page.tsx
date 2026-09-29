@@ -7,7 +7,9 @@ import { useLiveHighlights } from "@/lib/sync";
 import { api, formatCurrency } from "@/lib/api";
 import { useDisplayCurrency } from "@/lib/currency";
 import { useState } from "react";
-import { Banknote, CheckCircle2, ChevronLeft, ChevronRight, Download, FileText, Receipt, Search, TrendingDown } from "lucide-react";
+import { Banknote, CheckCircle2, ChevronLeft, ChevronRight, Download, FileSpreadsheet, FileText, Receipt, Search, TrendingDown } from "lucide-react";
+import { generateInvoicesRegisterExcel } from "@/lib/financial-excel";
+import { triggerFileDownload } from "@/lib/backup-export";
 import Link from "next/link";
 
 interface InvoiceItem {
@@ -131,6 +133,27 @@ export default function InvoicesPage() {
     }
   }
 
+  const [exportingExcel, setExportingExcel] = useState(false);
+
+  async function exportToExcel() {
+    setActionError("");
+    setExportingExcel(true);
+    try {
+      const allParams = new URLSearchParams();
+      if (search.trim()) allParams.set("search", search.trim());
+      if (status) allParams.set("paymentStatus", status);
+      allParams.set("page", "1");
+      allParams.set("limit", "1000");
+      const all = await api<InvoiceList>(`/invoices?${allParams.toString()}`, { skipCache: true });
+      const blob = generateInvoicesRegisterExcel(all.items || [], "AED", "FlyConnect Travel Agency");
+      triggerFileDownload(blob, `FlyConnect_Invoices_Register_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to export invoices to Excel");
+    } finally {
+      setExportingExcel(false);
+    }
+  }
+
   const stats = list.data?.stats;
 
   return (
@@ -141,7 +164,10 @@ export default function InvoicesPage() {
             <h1 className="text-[34px] font-extrabold tracking-[-0.04em]">Invoices</h1>
             <p className="text-base text-[#596782]">Issue, track and send invoices to your customers on WhatsApp.</p>
           </div>
-          <Link href="/bookings" className="flex h-11 items-center gap-2 rounded-lg bg-[#1688f9] px-6 font-bold text-white"><FileText className="h-4 w-4" />Issue from Bookings</Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={exportToExcel} disabled={exportingExcel} className="flex h-11 items-center gap-2 rounded-lg border border-[#22c55e]/40 bg-[#f0fdf4] px-5 text-sm font-bold text-[#15803d] hover:bg-[#dcfce7] disabled:opacity-50 shadow-sm"><FileSpreadsheet className="h-4 w-4" />{exportingExcel ? "Exporting..." : "Export Excel (.xlsx)"}</button>
+            <Link href="/bookings" className="flex h-11 items-center gap-2 rounded-lg bg-[#1688f9] px-6 font-bold text-white"><FileText className="h-4 w-4" />Issue from Bookings</Link>
+          </div>
         </div>
 
         {actionError ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{actionError}</p> : null}

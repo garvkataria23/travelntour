@@ -78,7 +78,9 @@ export function generateExcelBackup(backupData: BusinessBackupPayload): Blob {
     "Departure Date": b.departureDate || "",
     "Departure Time": b.departureTime || "",
     "Status": b.status || "",
-    "Amount": b.amount ?? 0,
+    "Amount (Selling)": b.amount ?? 0,
+    "Cost (COGS)": b.cost ?? 0,
+    "Gross Margin": Number(b.amount ?? 0) - Number(b.cost ?? 0),
     "Currency": b.currency || "AED",
     "Created Date": formatTimestamp(b.createdAt),
     "Updated Date": formatTimestamp(b.updatedAt),
@@ -96,7 +98,9 @@ export function generateExcelBackup(backupData: BusinessBackupPayload): Blob {
     { wch: 16 }, // Dep Date
     { wch: 16 }, // Dep Time
     { wch: 14 }, // Status
-    { wch: 12 }, // Amount
+    { wch: 16 }, // Amount
+    { wch: 14 }, // Cost
+    { wch: 14 }, // Gross Margin
     { wch: 10 }, // Currency
     { wch: 24 }, // Created Date
     { wch: 24 }, // Updated Date
