@@ -33,8 +33,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [user, setUser] = useState<ApiUser | null>(null);
   const router = useRouter();
-  const me = useApi<{ business?: { name?: string | null; currency?: string | null } }>("/settings");
+  const me = useApi<{ business?: { id?: string; name?: string | null; currency?: string | null } }>("/settings");
   const offline = useOffline();
+
+  useEffect(() => {
+    if (me.data?.business?.id && typeof window !== "undefined") {
+      window.localStorage.setItem("fc_business_id", me.data.business.id);
+    }
+  }, [me.data?.business?.id]);
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -72,6 +78,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           open={logoutOpen}
           onCancel={() => setLogoutOpen(false)}
           onConfirm={async () => {
+            try {
+              const { cleanUpPresence } = await import("@/lib/sync");
+              await cleanUpPresence();
+            } catch {
+              // ignore
+            }
             try {
               await firebaseLogOut();
             } catch {

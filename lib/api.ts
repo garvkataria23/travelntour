@@ -10,6 +10,7 @@ export interface ApiUser {
   email: string;
   role: string;
   phone?: string | null;
+  businessId?: string;
 }
 
 export interface ApiSession {
@@ -339,12 +340,39 @@ export async function api<T>(path: string, options: ApiRequestOptions = {}): Pro
           };
           const entity = (entityMap[seg] || "general") as any;
           const action = method === "POST" ? "CREATE" : method === "DELETE" ? "DELETE" : "UPDATE";
-          const entityId = path.split("?")[0].split("/").filter(Boolean)[1] || undefined;
+
+          const resObj = data && typeof data === "object" ? (data as Record<string, any>) : null;
+          const bodyObj = body && typeof body === "object" ? (body as Record<string, any>) : null;
+
+          const entityId =
+            path.split("?")[0].split("/").filter(Boolean)[1] ||
+            resObj?.id ||
+            resObj?.booking?.id ||
+            resObj?.customer?.id ||
+            resObj?.invoice?.id ||
+            resObj?.expense?.id ||
+            resObj?.income?.id ||
+            undefined;
+
+          const entityTitle =
+            resObj?.pnr ||
+            resObj?.invoiceNumber ||
+            resObj?.name ||
+            resObj?.title ||
+            resObj?.booking?.pnr ||
+            resObj?.customer?.name ||
+            bodyObj?.pnr ||
+            bodyObj?.name ||
+            bodyObj?.title ||
+            bodyObj?.invoiceNumber ||
+            undefined;
+
           broadcastLiveSync({
             entity,
             action,
             entityId,
-            data: body && typeof body === "object" ? (body as Record<string, unknown>) : undefined,
+            entityTitle,
+            data: bodyObj || undefined,
           }).catch(() => {});
         })
         .catch(() => {});

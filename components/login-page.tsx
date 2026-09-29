@@ -90,11 +90,14 @@ export function LoginPage() {
             displayName: "Demo Agent",
           });
           const token = await user.getIdToken();
+          if (typeof window !== "undefined" && profile.businessId) {
+            window.localStorage.setItem("fc_business_id", profile.businessId);
+          }
           setSession(
             {
               accessToken: token,
               refreshToken: user.refreshToken || token,
-              user: { id: profile.uid, name: profile.name, email: profile.email, role: profile.role },
+              user: { id: profile.uid, name: profile.name, email: profile.email, role: profile.role, businessId: profile.businessId },
             },
             remember
           );
@@ -103,11 +106,14 @@ export function LoginPage() {
           return;
         } catch {
           // Fallback if offline: create local session
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem("fc_business_id", "biz_demo");
+          }
           setSession(
             {
               accessToken: "demo_token_flyconnect",
               refreshToken: "demo_refresh_flyconnect",
-              user: { id: "usr_demo", name: "Demo Agent", email: "demo@flyconnect.app", role: "ADMIN" },
+              user: { id: "usr_demo", name: "Demo Agent", email: "demo@flyconnect.app", role: "ADMIN", businessId: "biz_demo" },
             },
             remember
           );
@@ -126,11 +132,14 @@ export function LoginPage() {
           displayName: name.trim(),
         });
         const token = await user.getIdToken();
+        if (typeof window !== "undefined" && profile.businessId) {
+          window.localStorage.setItem("fc_business_id", profile.businessId);
+        }
         setSession(
           {
             accessToken: token,
             refreshToken: user.refreshToken || token,
-            user: { id: profile.uid, name: profile.name, email: profile.email, role: profile.role },
+            user: { id: profile.uid, name: profile.name, email: profile.email, role: profile.role, businessId: profile.businessId },
           },
           remember
         );
@@ -144,11 +153,14 @@ export function LoginPage() {
           displayName: user.displayName,
         });
         const token = await user.getIdToken();
+        if (typeof window !== "undefined" && profile.businessId) {
+          window.localStorage.setItem("fc_business_id", profile.businessId);
+        }
         setSession(
           {
             accessToken: token,
             refreshToken: user.refreshToken || token,
-            user: { id: profile.uid, name: profile.name, email: profile.email, role: profile.role },
+            user: { id: profile.uid, name: profile.name, email: profile.email, role: profile.role, businessId: profile.businessId },
           },
           remember
         );

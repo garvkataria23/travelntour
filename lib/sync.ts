@@ -80,6 +80,37 @@ export function getCollaboratorColor(str: string): string {
   return COLLABORATOR_COLORS[index];
 }
 
+/**
+ * Returns the active tenant businessId for multi-tenant Firestore sync scoping.
+ */
+export function getStoredBusinessId(): string {
+  if (typeof window === "undefined") return "default";
+  const stored = getStoredUser();
+  if (stored?.businessId) return stored.businessId;
+  const cached = window.localStorage.getItem("fc_business_id");
+  if (cached) return cached;
+  if (stored?.id) {
+    return `biz_${stored.id.slice(0, 16)}`;
+  }
+  return "default";
+}
+
+/**
+ * Clean up active user presence on logout
+ */
+export async function cleanUpPresence(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const stored = getStoredUser();
+  if (!stored?.id) return;
+  const businessId = getStoredBusinessId();
+  try {
+    const presenceDocRef = doc(db, "businesses", businessId, "presence", stored.id);
+    await deleteDoc(presenceDocRef);
+  } catch {
+    // best effort
+  }
+}
+
 // In-memory event listeners
 const eventListeners = new Set<(event: LiveSyncEvent) => void>();
 
@@ -172,7 +203,7 @@ export async function broadcastLiveSync(params: {
 
   // 2. Broadcast across devices to remote colleagues via Firestore
   try {
-    const businessId = (stored as any)?.businessId || "default";
+    const businessId = getStoredBusinessId();
     const eventDoc = doc(collection(db, "businesses", businessId, "sync_events"), event.id);
     await setDoc(eventDoc, {
       id: event.id,
@@ -287,7 +318,7 @@ export function useCollaboratorPresence(currentPage: string) {
     if (typeof window === "undefined" || !storedUser?.id) return;
 
     const userId = storedUser.id;
-    const businessId = (storedUser as any)?.businessId || "default";
+    const businessId = getStoredBusinessId();
     const userColor = getCollaboratorColor(storedUser.name || storedUser.email);
 
     const presenceDocRef = doc(db, "businesses", businessId, "presence", userId);
