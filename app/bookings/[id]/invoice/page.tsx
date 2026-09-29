@@ -52,7 +52,21 @@ interface InvoiceData {
 
 interface InvoiceSettings {
   business: { id: string; name: string; email: string; phone: string | null; logo: string | null } | null;
-  preferences: { gstEnabled: boolean; gstRate: number; gstin: string | null; invoicePrefix: string | null; nextInvoiceNo: number } | null;
+  preferences: {
+    gstEnabled: boolean;
+    gstRate: number;
+    gstin: string | null;
+    taxLabel?: string | null;
+    invoicePrefix: string | null;
+    nextInvoiceNo: number;
+    bankName?: string | null;
+    bankAccountName?: string | null;
+    bankAccountNumber?: string | null;
+    bankIfscSwift?: string | null;
+    bankUpiId?: string | null;
+    invoiceTerms?: string | null;
+    invoiceNotes?: string | null;
+  } | null;
 }
 
 export default function BookingInvoicePage() {
@@ -147,7 +161,7 @@ export default function BookingInvoicePage() {
       </header>
 
       {message ? <div className={`no-print fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-lg px-5 py-3 text-sm font-semibold text-white shadow-2xl ${message.tone === "success" ? "bg-[#0e7a4a]" : "bg-[#d2274f]"}`}>{message.text}</div> : null}
-      {itemModal ? <ItemModal onClose={() => setItemModal(null)} onSaved={async () => { setItemModal(null); invoice.refetch(); }} bookingId={id} item={itemModal.item} mode={itemModal.mode} onError={(text) => notify("error", text)} /> : null}
+      {itemModal ? <ItemModal onClose={() => setItemModal(null)} onSaved={async () => { setItemModal(null); invoice.refetch(); }} bookingId={id} item={itemModal.item} mode={itemModal.mode} currency={data?.currency ?? BASE_CURRENCY} onError={(text) => notify("error", text)} /> : null}
       {paymentOpen && data ? <PaymentModal onClose={() => setPaymentOpen(false)} onSaved={async () => { setPaymentOpen(false); invoice.refetch(); }} bookingId={id} invoice={data} onError={(text) => notify("error", text)} /> : null}
 
       <main className="mx-auto max-w-[860px] px-4 py-8 sm:px-8">
@@ -224,7 +238,7 @@ function InvoicePaper({ invoice: b, settings }: { invoice: InvoiceData; settings
           <div>
             <h1 className="text-2xl font-extrabold tracking-[-0.03em] text-[#0e2a5c]">{business?.name ?? "Travel Agency"}</h1>
             <p className="text-sm text-[#65728a]">{business?.phone ?? ""}{business?.email ? ` · ${business.email}` : ""}</p>
-            {prefs?.gstin ? <p className="mt-1 text-xs font-bold text-[#65728a]">GSTIN: {prefs.gstin}</p> : null}
+            {prefs?.gstin ? <p className="mt-1 text-xs font-bold text-[#65728a]">{(prefs.taxLabel || "GST").toUpperCase()}: {prefs.gstin}</p> : null}
           </div>
         </div>
         <div className="text-right">
@@ -265,7 +279,7 @@ function InvoicePaper({ invoice: b, settings }: { invoice: InvoiceData; settings
             {items.map((item) => <InvoiceLine key={item.description} label={item.description} value={item.amount} currency={currency} />)}
             {(b.discount ?? 0) > 0 ? <InvoiceLine label="Less: Discount" value={-(b.discount ?? 0)} currency={currency} negative /> : null}
             <InvoiceLine label="Taxable Value" value={b.taxable} currency={currency} bold />
-            <InvoiceLine label={`GST @ ${formatRate(b.taxRate ?? 0)}%`} value={b.taxAmount ?? 0} currency={currency} />
+            <InvoiceLine label={`${(prefs?.taxLabel || "GST").toUpperCase()} @ ${formatRate(b.taxRate ?? 0)}%`} value={b.taxAmount ?? 0} currency={currency} />
           </tbody>
           <tfoot>
             <tr>
@@ -283,6 +297,26 @@ function InvoicePaper({ invoice: b, settings }: { invoice: InvoiceData; settings
             </tr>
           </tfoot>
         </table>
+
+        {(prefs?.bankName || prefs?.bankAccountNumber || prefs?.bankUpiId) && (
+          <div className="mt-6 rounded-xl border border-[#e2edf8] bg-[#f8fbff] p-4 text-xs">
+            <p className="mb-2 font-bold uppercase tracking-wider text-[#0e2a5c]">Bank &amp; Payment Instructions</p>
+            <div className="grid gap-2 text-[#405174] sm:grid-cols-2">
+              {prefs.bankName && <div><span className="font-semibold text-[#071333]">Bank:</span> {prefs.bankName}</div>}
+              {prefs.bankAccountName && <div><span className="font-semibold text-[#071333]">Account Name:</span> {prefs.bankAccountName}</div>}
+              {prefs.bankAccountNumber && <div><span className="font-semibold text-[#071333]">Account / IBAN:</span> <span className="font-mono font-bold text-[#0e2a5c]">{prefs.bankAccountNumber}</span></div>}
+              {prefs.bankIfscSwift && <div><span className="font-semibold text-[#071333]">IFSC / SWIFT:</span> <span className="font-mono">{prefs.bankIfscSwift}</span></div>}
+              {prefs.bankUpiId && <div><span className="font-semibold text-[#071333]">UPI / Scan &amp; Pay:</span> <span className="font-bold text-[#1688f9]">{prefs.bankUpiId}</span></div>}
+            </div>
+          </div>
+        )}
+
+        {prefs?.invoiceTerms && (
+          <p className="mt-4 text-xs leading-5 text-[#65728a]"><span className="font-bold text-[#071333]">Terms: </span>{prefs.invoiceTerms}</p>
+        )}
+        {prefs?.invoiceNotes && (
+          <p className="mt-1 text-xs leading-5 text-[#65728a]"><span className="font-bold text-[#071333]">Note: </span>{prefs.invoiceNotes}</p>
+        )}
 
         <div className="mt-8 flex items-start justify-between gap-6 border-t border-[#e5edf6] pt-6">
           <p className="max-w-[340px] text-xs leading-5 text-[#8a97ad]">This is a computer generated invoice. Please verify all details before making any payment. For queries contact {business?.name ?? "us"} on {business?.phone ?? "your booked number"}.</p>
@@ -315,7 +349,7 @@ function PaymentStatusBadge({ value }: { value: string }) {
   return <span className="inline-flex items-center gap-1 rounded-md bg-[#fff0dc] px-3 py-1 text-xs font-bold text-[#fb8500]">Unpaid</span>;
 }
 
-function ItemModal({ mode, item, bookingId, onClose, onSaved, onError }: { mode: "add" | "edit"; item?: InvoiceItem; bookingId: string; onClose: () => void; onSaved: () => void; onError: (text: string) => void }) {
+function ItemModal({ mode, item, bookingId, currency, onClose, onSaved, onError }: { mode: "add" | "edit"; item?: InvoiceItem; bookingId: string; currency?: string; onClose: () => void; onSaved: () => void; onError: (text: string) => void }) {
   const [description, setDescription] = useState(item?.description ?? "");
   const [quantity, setQuantity] = useState(item ? String(item.quantity) : "1");
   const [unitPrice, setUnitPrice] = useState(item ? String(item.unitPrice) : "");
@@ -359,7 +393,7 @@ function ItemModal({ mode, item, bookingId, onClose, onSaved, onError }: { mode:
           <label className="block"><span className="mb-2 block text-sm font-semibold">Description *</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Flight ticket, Convenience fee" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
           <div className="grid grid-cols-2 gap-4">
             <label className="block"><span className="mb-2 block text-sm font-semibold">Quantity</span><input type="number" min="1" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
-            <label className="block"><span className="mb-2 block text-sm font-semibold">Unit Price (AED)</span><input type="number" min="0" step="any" value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} placeholder="e.g. 2500" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+            <label className="block"><span className="mb-2 block text-sm font-semibold">Unit Price ({currency || "AED"})</span><input type="number" min="0" step="any" value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} placeholder="e.g. 2500" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="h-11 rounded-lg border border-[#d6e1ef] px-6 font-semibold text-[#405174]">Cancel</button>
@@ -420,7 +454,7 @@ function PaymentModal({ invoice, bookingId, onClose, onSaved, onError }: { invoi
             </div>
           </div>
           {status === "PARTIAL" ? (
-            <label className="block"><span className="mb-2 block text-sm font-semibold">Amount Collected (AED) *</span><input type="number" min="0" step="any" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} placeholder="e.g. 5000" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+            <label className="block"><span className="mb-2 block text-sm font-semibold">Amount Collected ({currency}) *</span><input type="number" min="0" step="any" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} placeholder="e.g. 5000" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
           ) : null}
           {status === "PAID" ? <p className="rounded-lg bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">Marks the invoice as fully paid.</p> : null}
           <div className="flex justify-end gap-3 pt-2">

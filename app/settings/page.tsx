@@ -49,8 +49,16 @@ interface SettingsData {
     gstEnabled: boolean;
     gstRate: number;
     gstin: string | null;
+    taxLabel?: string | null;
     invoicePrefix: string;
     nextInvoiceNo: number;
+    bankName?: string | null;
+    bankAccountName?: string | null;
+    bankAccountNumber?: string | null;
+    bankIfscSwift?: string | null;
+    bankUpiId?: string | null;
+    invoiceTerms?: string | null;
+    invoiceNotes?: string | null;
   } | null;
   whatsapp: { phoneNumberId: string; displayPhoneNumber: string; status: string } | null;
 }
@@ -133,8 +141,16 @@ export default function SettingsPage() {
   const [gstEnabled, setGstEnabled] = useState(false);
   const [gstRate, setGstRate] = useState("");
   const [gstin, setGstin] = useState("");
+  const [taxLabel, setTaxLabel] = useState("GST");
   const [invoicePrefix, setInvoicePrefix] = useState("INV");
   const [nextInvoiceNo, setNextInvoiceNo] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankAccountName, setBankAccountName] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [bankIfscSwift, setBankIfscSwift] = useState("");
+  const [bankUpiId, setBankUpiId] = useState("");
+  const [invoiceTerms, setInvoiceTerms] = useState("");
+  const [invoiceNotes, setInvoiceNotes] = useState("");
   const [gstSaving, setGstSaving] = useState(false);
 
   const [downloadingExcel, setDownloadingExcel] = useState(false);
@@ -656,8 +672,16 @@ export default function SettingsPage() {
       setGstEnabled(p.gstEnabled);
       setGstRate(p.gstRate ? String(p.gstRate) : "");
       setGstin(p.gstin ?? "");
+      setTaxLabel(p.taxLabel || "GST");
       setInvoicePrefix(p.invoicePrefix || "INV");
       setNextInvoiceNo(p.nextInvoiceNo ? String(p.nextInvoiceNo) : "");
+      setBankName(p.bankName ?? "");
+      setBankAccountName(p.bankAccountName ?? "");
+      setBankAccountNumber(p.bankAccountNumber ?? "");
+      setBankIfscSwift(p.bankIfscSwift ?? "");
+      setBankUpiId(p.bankUpiId ?? "");
+      setInvoiceTerms(p.invoiceTerms ?? "");
+      setInvoiceNotes(p.invoiceNotes ?? "");
     }
   }, [settings.data?.business?.id, settings.data?.preferences]);
 
@@ -712,8 +736,16 @@ export default function SettingsPage() {
     setGstEnabled(p?.gstEnabled ?? false);
     setGstRate(p?.gstRate ? String(p.gstRate) : "");
     setGstin(p?.gstin ?? "");
+    setTaxLabel(p?.taxLabel || "GST");
     setInvoicePrefix(p?.invoicePrefix || "INV");
     setNextInvoiceNo(p?.nextInvoiceNo ? String(p.nextInvoiceNo) : "");
+    setBankName(p?.bankName ?? "");
+    setBankAccountName(p?.bankAccountName ?? "");
+    setBankAccountNumber(p?.bankAccountNumber ?? "");
+    setBankIfscSwift(p?.bankIfscSwift ?? "");
+    setBankUpiId(p?.bankUpiId ?? "");
+    setInvoiceTerms(p?.invoiceTerms ?? "");
+    setInvoiceNotes(p?.invoiceNotes ?? "");
   }
 
   async function saveGst() {
@@ -721,7 +753,7 @@ export default function SettingsPage() {
     setActionError("");
     const rate = Number(gstRate || 0);
     const next = Number(nextInvoiceNo || 1);
-    if (Number.isNaN(rate) || rate < 0 || rate > 100) { setFormError("GST rate must be between 0 and 100."); return; }
+    if (Number.isNaN(rate) || rate < 0 || rate > 100) { setFormError("Tax rate must be between 0 and 100."); return; }
     if (Number.isNaN(next) || next < 1) { setFormError("Next invoice number must be at least 1."); return; }
     setGstSaving(true);
     try {
@@ -731,11 +763,19 @@ export default function SettingsPage() {
           gstEnabled,
           gstRate: rate,
           gstin: gstin.trim() || undefined,
+          taxLabel: taxLabel.trim() || "GST",
           invoicePrefix: invoicePrefix.trim() || "INV",
           nextInvoiceNo: next,
+          bankName: bankName.trim() || undefined,
+          bankAccountName: bankAccountName.trim() || undefined,
+          bankAccountNumber: bankAccountNumber.trim() || undefined,
+          bankIfscSwift: bankIfscSwift.trim() || undefined,
+          bankUpiId: bankUpiId.trim() || undefined,
+          invoiceTerms: invoiceTerms.trim() || undefined,
+          invoiceNotes: invoiceNotes.trim() || undefined,
         },
       });
-      setNotice("Tax & billing settings updated");
+      setNotice("Tax, invoicing and bank details saved");
       window.setTimeout(() => setNotice(""), 4000);
       settings.refetch();
     } catch (err) {
@@ -816,23 +856,98 @@ export default function SettingsPage() {
             ) : null}
 
             {active === "gst" ? (
-              <Panel title="Tax & Invoicing">
-                <p className="mb-4 text-[#596782]">Configure GST and automatic invoice numbers used on printable booking invoices.</p>
+              <Panel title="Tax, Invoicing & Banking Details">
+                <p className="mb-4 text-[#596782]">Configure tax rates, invoice numbering, bank payment instructions, and custom terms printed on customer invoices.</p>
                 {formError ? <p className="mb-3 rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{formError}</p> : null}
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-lg bg-[#f1f7ff] p-4">
-                  <div><div className="font-bold">Enable GST billing</div><div className="text-sm text-[#596782]">Applies this tax rate to new bookings by default and shows GST on invoices.</div></div>
-                  <button type="button" role="switch" aria-checked={gstEnabled} onClick={() => setGstEnabled((value) => !value)} className={`relative h-7 w-12 shrink-0 rounded-full transition ${gstEnabled ? "bg-[#1688f9]" : "bg-[#b8c4d8]"}`}><span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${gstEnabled ? "left-6" : "left-1"}`} /></button>
+
+                {/* Section 1: Tax Settings */}
+                <div className="mb-6 rounded-xl border border-[#dce7f4] bg-[#f8fbff] p-4">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <div className="font-bold text-[#071333]">Enable Tax / GST Billing</div>
+                      <div className="text-sm text-[#596782]">Applies this tax rate to new bookings by default and calculates taxes on invoices.</div>
+                    </div>
+                    <button type="button" role="switch" aria-checked={gstEnabled} onClick={() => setGstEnabled((value) => !value)} className={`relative h-7 w-12 shrink-0 rounded-full transition ${gstEnabled ? "bg-[#1688f9]" : "bg-[#b8c4d8]"}`}><span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${gstEnabled ? "left-6" : "left-1"}`} /></button>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold">Tax Type / Label</span>
+                      <input value={taxLabel} onChange={(e) => setTaxLabel(e.target.value)} placeholder="e.g. GST, VAT, TRN" className="h-11 w-full rounded-lg border border-[#d6e1ef] bg-white px-3 font-semibold uppercase outline-none focus:border-[#1688f9]" />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold">Default Tax Rate (%)</span>
+                      <input type="number" min="0" max="100" value={gstRate} onChange={(e) => setGstRate(e.target.value)} placeholder="e.g. 5" className="h-11 w-full rounded-lg border border-[#d6e1ef] bg-white px-3 outline-none focus:border-[#1688f9]" />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold">Tax Registration ID ({taxLabel.toUpperCase() || "GSTIN"})</span>
+                      <input value={gstin} onChange={(e) => setGstin(e.target.value)} placeholder="e.g. 27AABCU9603R1ZM" className="h-11 w-full rounded-lg border border-[#d6e1ef] bg-white px-3 font-mono uppercase outline-none focus:border-[#1688f9]" />
+                    </label>
+                  </div>
                 </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="block"><span className="mb-1 block font-semibold">Default GST Rate (%)</span><input type="number" min="0" max="100" value={gstRate} onChange={(e) => setGstRate(e.target.value)} placeholder="e.g. 5" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 outline-none focus:border-[#1688f9]" /></label>
-                  <label className="block"><span className="mb-1 block font-semibold">GSTIN</span><input value={gstin} onChange={(e) => setGstin(e.target.value)} placeholder="e.g. 27AABCU9603R1ZM" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 font-mono uppercase outline-none focus:border-[#1688f9]" /></label>
-                  <label className="block"><span className="mb-1 block font-semibold">Invoice Prefix</span><input value={invoicePrefix} onChange={(e) => setInvoicePrefix(e.target.value)} placeholder="INV" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 outline-none focus:border-[#1688f9]" /></label>
-                  <label className="block"><span className="mb-1 block font-semibold">Next Invoice Number</span><input type="number" min="1" value={nextInvoiceNo} onChange={(e) => setNextInvoiceNo(e.target.value)} placeholder="1" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 outline-none focus:border-[#1688f9]" /></label>
+
+                {/* Section 2: Invoice Sequence */}
+                <div className="mb-6 rounded-xl border border-[#dce7f4] p-4">
+                  <h3 className="mb-3 font-bold text-[#071333]">Invoice Numbering Sequence</h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold">Invoice Prefix</span>
+                      <input value={invoicePrefix} onChange={(e) => setInvoicePrefix(e.target.value)} placeholder="INV" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 font-semibold uppercase outline-none focus:border-[#1688f9]" />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold">Next Invoice Number</span>
+                      <input type="number" min="1" value={nextInvoiceNo} onChange={(e) => setNextInvoiceNo(e.target.value)} placeholder="1" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 outline-none focus:border-[#1688f9]" />
+                    </label>
+                  </div>
+                  <p className="mt-2.5 text-xs text-[#65728a]">Next invoice generated will be formatted as: <b className="font-mono text-[#0e2a5c]">{`${invoicePrefix.trim() || "INV"}-${String(Number(nextInvoiceNo || 1)).padStart(5, "0")}`}</b></p>
                 </div>
-                <p className="mt-3 text-sm text-[#65728a]">Next invoice number increments automatically whenever a booking invoice is issued. Example: <b>{`${invoicePrefix.trim() || "INV"}-${String(Number(nextInvoiceNo || 1)).padStart(5, "0")}`}</b></p>
+
+                {/* Section 3: Agency Bank & Payment Details */}
+                <div className="mb-6 rounded-xl border border-[#dce7f4] bg-[#fdfefe] p-4">
+                  <h3 className="mb-1 font-bold text-[#071333]">Agency Bank &amp; Payment Instructions</h3>
+                  <p className="mb-3 text-xs text-[#596782]">These details are automatically printed on invoices and PDF downloads so clients know where to send payment.</p>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold">Bank Name</span>
+                      <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="e.g. Emirates NBD / HDFC Bank" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 outline-none focus:border-[#1688f9]" />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold">Account / Beneficiary Name</span>
+                      <input value={bankAccountName} onChange={(e) => setBankAccountName(e.target.value)} placeholder="e.g. FlyConnect Travel Agency LLC" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 outline-none focus:border-[#1688f9]" />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold">Account Number / IBAN</span>
+                      <input value={bankAccountNumber} onChange={(e) => setBankAccountNumber(e.target.value)} placeholder="e.g. AE000000000000000000000" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 font-mono outline-none focus:border-[#1688f9]" />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold">SWIFT / BIC / IFSC Code</span>
+                      <input value={bankIfscSwift} onChange={(e) => setBankIfscSwift(e.target.value)} placeholder="e.g. EBILAEADXXX" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 font-mono uppercase outline-none focus:border-[#1688f9]" />
+                    </label>
+                    <label className="block md:col-span-2">
+                      <span className="mb-1 block text-sm font-semibold">UPI ID / Quick Payment Note (Optional)</span>
+                      <input value={bankUpiId} onChange={(e) => setBankUpiId(e.target.value)} placeholder="e.g. agency@okhdfcbank" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 outline-none focus:border-[#1688f9]" />
+                    </label>
+                  </div>
+                </div>
+
+                {/* Section 4: Terms & Conditions and Footer Notes */}
+                <div className="mb-6 rounded-xl border border-[#dce7f4] p-4">
+                  <h3 className="mb-1 font-bold text-[#071333]">Invoice Terms &amp; Footer Notes</h3>
+                  <p className="mb-3 text-xs text-[#596782]">Specify your cancellation/refund policies, payment terms, or custom greeting printed at the bottom of customer invoices.</p>
+                  <div className="space-y-4">
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold">Terms &amp; Conditions</span>
+                      <textarea rows={2} value={invoiceTerms} onChange={(e) => setInvoiceTerms(e.target.value)} placeholder="e.g. Flight tickets are subject to airline fare rules and cancellation fees. Date change penalties apply." className="w-full rounded-lg border border-[#d6e1ef] p-3 text-sm outline-none focus:border-[#1688f9]" />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold">Footer Notes / Greeting</span>
+                      <textarea rows={2} value={invoiceNotes} onChange={(e) => setInvoiceNotes(e.target.value)} placeholder="e.g. Thank you for travelling with us! For immediate assistance, contact our 24/7 hotline." className="w-full rounded-lg border border-[#d6e1ef] p-3 text-sm outline-none focus:border-[#1688f9]" />
+                    </label>
+                  </div>
+                </div>
+
                 <div className="mt-5 flex items-center justify-end gap-3">
                   <button onClick={resetGst} disabled={gstSaving} className="h-11 rounded-lg border border-[#d6e1ef] px-6 font-semibold text-[#405174] disabled:opacity-60">Cancel</button>
-                  <button onClick={saveGst} disabled={gstSaving} className="h-11 rounded-lg bg-[#1688f9] px-6 font-bold text-white disabled:opacity-60">{gstSaving ? "Saving..." : "Save Tax Settings"}</button>
+                  <button onClick={saveGst} disabled={gstSaving} className="h-11 rounded-lg bg-[#1688f9] px-6 font-bold text-white disabled:opacity-60">{gstSaving ? "Saving..." : "Save Settings"}</button>
                 </div>
               </Panel>
             ) : null}

@@ -126,24 +126,45 @@ export function generateExcelBackup(backupData: BusinessBackupPayload): Blob {
   XLSX.utils.book_append_sheet(wb, wsCustomers, "Customers");
 
   // 4. Invoices Sheet
-  const invoiceRows = backupData.data.invoices.map((inv) => ({
-    "Invoice ID": inv.id || "",
-    "Invoice Number": inv.invoiceNumber || "",
-    "Booking ID": inv.bookingId || "",
-    "Amount": inv.amount ?? 0,
-    "Payment Status": inv.paymentStatus || "",
-    "Created Date": formatTimestamp(inv.createdAt),
-    "Updated Date": formatTimestamp(inv.updatedAt),
-  }));
+  const invoiceRows = backupData.data.invoices.map((inv) => {
+    const total = Number(inv.total ?? inv.amount ?? 0);
+    const paid = Number(inv.paidAmount ?? (inv.paymentStatus === "PAID" ? total : 0));
+    const due = Math.max(0, total - paid);
+    return {
+      "Invoice #": inv.invoiceNumber || inv.id || "",
+      "Customer": inv.customerName || "",
+      "Phone": inv.customerPhone || "",
+      "PNR": inv.pnr || "",
+      "Route": inv.fromCity && inv.toCity ? `${inv.fromCity} → ${inv.toCity}` : "",
+      "Issued Date": formatTimestamp(inv.invoiceIssuedAt || inv.createdAt),
+      "Currency": inv.currency || "AED",
+      "Subtotal": Number(inv.subtotal ?? total),
+      "Discount": Number(inv.discount ?? 0),
+      "Tax Amount": Number(inv.taxAmount ?? 0),
+      "Total Amount": total,
+      "Paid Amount": paid,
+      "Amount Due": due,
+      "Payment Status": inv.paymentStatus || (due === 0 && total > 0 ? "PAID" : "UNPAID"),
+      "Booking ID": inv.bookingId || inv.id || "",
+    };
+  });
   const wsInvoices = XLSX.utils.json_to_sheet(invoiceRows.length ? invoiceRows : [{ "Status": "No invoices recorded" }]);
   wsInvoices["!cols"] = [
-    { wch: 22 },
-    { wch: 18 },
-    { wch: 22 },
-    { wch: 14 },
-    { wch: 16 },
-    { wch: 24 },
-    { wch: 24 },
+    { wch: 18 }, // Invoice #
+    { wch: 22 }, // Customer
+    { wch: 16 }, // Phone
+    { wch: 12 }, // PNR
+    { wch: 20 }, // Route
+    { wch: 20 }, // Issued Date
+    { wch: 10 }, // Currency
+    { wch: 14 }, // Subtotal
+    { wch: 12 }, // Discount
+    { wch: 12 }, // Tax Amount
+    { wch: 14 }, // Total Amount
+    { wch: 14 }, // Paid Amount
+    { wch: 14 }, // Amount Due
+    { wch: 16 }, // Payment Status
+    { wch: 24 }, // Booking ID
   ];
   XLSX.utils.book_append_sheet(wb, wsInvoices, "Invoices");
 
@@ -151,19 +172,23 @@ export function generateExcelBackup(backupData: BusinessBackupPayload): Blob {
   const incomeRows = backupData.data.income.map((inc) => ({
     "Income ID": inc.id || "",
     "Title / Description": inc.title || "",
-    "Category": inc.category || "",
+    "Category": inc.category || "OTHER",
     "Amount": inc.amount ?? 0,
-    "Date": inc.date || "",
-    "Created Date": formatTimestamp(inc.createdAt),
+    "Currency": inc.currency || "AED",
+    "Reference": inc.reference || "",
+    "Note": inc.note || "",
+    "Date Received": formatTimestamp(inc.receivedOn || inc.date || inc.createdAt),
   }));
   const wsIncome = XLSX.utils.json_to_sheet(incomeRows.length ? incomeRows : [{ "Status": "No income recorded" }]);
   wsIncome["!cols"] = [
     { wch: 22 },
     { wch: 28 },
-    { wch: 18 },
-    { wch: 14 },
     { wch: 16 },
-    { wch: 24 },
+    { wch: 14 },
+    { wch: 10 },
+    { wch: 18 },
+    { wch: 26 },
+    { wch: 22 },
   ];
   XLSX.utils.book_append_sheet(wb, wsIncome, "Income");
 
@@ -171,19 +196,23 @@ export function generateExcelBackup(backupData: BusinessBackupPayload): Blob {
   const expenseRows = backupData.data.expenses.map((exp) => ({
     "Expense ID": exp.id || "",
     "Title / Description": exp.title || "",
-    "Category": exp.category || "",
+    "Category": exp.category || "OPERATING",
     "Amount": exp.amount ?? 0,
-    "Date": exp.date || "",
-    "Created Date": formatTimestamp(exp.createdAt),
+    "Currency": exp.currency || "AED",
+    "Payable To": exp.payableTo || "",
+    "Description": exp.description || "",
+    "Date Incurred": formatTimestamp(exp.incurredOn || exp.date || exp.createdAt),
   }));
   const wsExpenses = XLSX.utils.json_to_sheet(expenseRows.length ? expenseRows : [{ "Status": "No expenses recorded" }]);
   wsExpenses["!cols"] = [
     { wch: 22 },
     { wch: 28 },
-    { wch: 18 },
-    { wch: 14 },
     { wch: 16 },
-    { wch: 24 },
+    { wch: 14 },
+    { wch: 10 },
+    { wch: 20 },
+    { wch: 26 },
+    { wch: 22 },
   ];
   XLSX.utils.book_append_sheet(wb, wsExpenses, "Expenses");
 

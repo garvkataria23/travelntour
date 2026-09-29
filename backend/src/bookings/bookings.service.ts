@@ -10,6 +10,7 @@ import { isValidPhone, normalizePhone, parseAirportInput } from '../common/utils
 import { BASE_CURRENCY } from '../currency/decimals';
 import { PrismaService } from '../prisma/prisma.service';
 import { AutomationService } from '../automation/automation.service';
+import { InvoicesService } from '../invoices/invoices.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 
@@ -19,6 +20,7 @@ export class BookingsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly automation: AutomationService,
+    private readonly invoices: InvoicesService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -375,6 +377,10 @@ export class BookingsService {
       pnr: created.booking.pnr,
       customerName: customer.name,
     });
+
+    if (created.booking.invoiceNumber) {
+      await this.invoices.captureInvoiceDocument(user, created.booking.id).catch(() => null);
+    }
 
     return {
       ...created.booking,

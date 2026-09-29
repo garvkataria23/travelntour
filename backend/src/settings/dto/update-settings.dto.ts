@@ -64,6 +64,10 @@ export class UpdateSettingsDto {
 
   @IsOptional()
   @IsString()
+  taxLabel?: string;
+
+  @IsOptional()
+  @IsString()
   invoicePrefix?: string;
 
   @IsOptional()
@@ -71,4 +75,33 @@ export class UpdateSettingsDto {
   @IsInt({ message: 'Next invoice number must be an integer' })
   @Min(1)
   nextInvoiceNo?: number;
+
+  // --- Banking & Invoice Details ------------------------------------
+  @IsOptional()
+  @IsString()
+  bankName?: string;
+
+  @IsOptional()
+  @IsString()
+  bankAccountName?: string;
+
+  @IsOptional()
+  @IsString()
+  bankAccountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  bankIfscSwift?: string;
+
+  @IsOptional()
+  @IsString()
+  bankUpiId?: string;
+
+  @IsOptional()
+  @IsString()
+  invoiceTerms?: string;
+
+  @IsOptional()
+  @IsString()
+  invoiceNotes?: string;
 }

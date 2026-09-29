@@ -313,6 +313,41 @@ export class InvoicesService {
   // Line items
   // ------------------------------------------------------------------
 
+  private async syncBookingInvoiceTotals(user: AuthUser, bookingId: string) {
+    const booking = await this.loadInvoice(user, bookingId);
+    const totals = this.computeTotals(booking as Booking, booking.invoiceItems as InvoiceItem[]);
+    let paidAmount = Math.min(booking.paidAmount ?? 0, totals.total);
+    let paymentStatus: InvoicePaymentStatus = booking.paymentStatus;
+
+    if (paidAmount >= totals.total && totals.total > 0) {
+      paymentStatus = 'PAID';
+      paidAmount = totals.total;
+    } else if (paidAmount > 0) {
+      paymentStatus = 'PARTIAL';
+    } else {
+      paymentStatus = 'UNPAID';
+    }
+
+    const updated = await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        amount: totals.total,
+        paidAmount,
+        paymentStatus,
+      },
+      include: {
+        customer: { select: { id: true, name: true, phone: true, email: true } },
+        invoiceItems: { orderBy: { sortOrder: 'asc' } },
+      },
+    });
+
+    if (updated.invoiceNumber) {
+      await this.captureInvoiceDocument(user, bookingId);
+    }
+
+    return this.serialize(updated as Booking, updated.invoiceItems as InvoiceItem[]);
+  }
+
   async addItem(user: AuthUser, id: string, dto: CreateInvoiceItemDto) {
     const booking = await this.loadInvoice(user, id);
     const quantity = dto.quantity ?? 1;
@@ -336,8 +371,7 @@ export class InvoicesService {
       amount,
     });
 
-    const updated = await this.loadInvoice(user, id);
-    return this.serialize(updated as Booking, updated.invoiceItems as InvoiceItem[]);
+    return this.syncBookingInvoiceTotals(user, id);
   }
 
   async updateItem(user: AuthUser, id: string, itemId: string, dto: UpdateInvoiceItemDto) {
@@ -363,8 +397,7 @@ export class InvoicesService {
       fields: Object.keys(data),
     });
 
-    const updated = await this.loadInvoice(user, id);
-    return this.serialize(updated as Booking, updated.invoiceItems as InvoiceItem[]);
+    return this.syncBookingInvoiceTotals(user, id);
   }
 
   async removeItem(user: AuthUser, id: string, itemId: string) {
@@ -374,8 +407,7 @@ export class InvoicesService {
     }
     await this.prisma.invoiceItem.delete({ where: { id: itemId } });
     await this.audit.log(user, 'INVOICE_ITEM_REMOVED', 'Booking', id, { itemId });
-    const updated = await this.loadInvoice(user, id);
-    return this.serialize(updated as Booking, updated.invoiceItems as InvoiceItem[]);
+    return this.syncBookingInvoiceTotals(user, id);
   }
 
   // ------------------------------------------------------------------
@@ -413,6 +445,12 @@ export class InvoicesService {
       paidAmount,
     });
 
+    // Re-capture document snapshot so that downloads and WhatsApp sends reflect the
+    // updated payment status and paid amount.
+    if (updated.invoiceNumber) {
+      await this.captureInvoiceDocument(user, id);
+    }
+
     return this.serialize(updated as Booking, updated.invoiceItems as InvoiceItem[]);
   }
 
@@ -448,6 +486,14 @@ export class InvoicesService {
         gstin: setting?.gstin,
         gstRate: setting?.gstRate,
         gstEnabled: setting?.gstEnabled,
+        taxLabel: setting?.taxLabel,
+        bankName: setting?.bankName,
+        bankAccountName: setting?.bankAccountName,
+        bankAccountNumber: setting?.bankAccountNumber,
+        bankIfscSwift: setting?.bankIfscSwift,
+        bankUpiId: setting?.bankUpiId,
+        invoiceTerms: setting?.invoiceTerms,
+        invoiceNotes: setting?.invoiceNotes,
       },
       items,
       subtotal: totals.subtotal,
@@ -455,14 +501,6 @@ export class InvoicesService {
       taxAmount: totals.taxAmount,
       total: totals.total,
       paidAmount,
-      // Anchored to when the invoice was issued, not to the moment of rendering.
-      //
-      // The PDF footer prints a date and jsPDF stamps /CreationDate, both of which
-      // default to "now". A draft re-rendered on demand legitimately shows today's date,
-      // but an issued invoice must render to identical bytes every time - otherwise a
-      // re-capture produces a different sha256 for an unchanged document, and the stored
-      // snapshot can never be recognised as current. `invoiceIssuedAt` is the only
-      // timestamp that means "the document as it was issued".
       generatedAt: booking.invoiceIssuedAt ?? undefined,
     };
 

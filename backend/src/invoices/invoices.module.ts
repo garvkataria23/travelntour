@@ -8,5 +8,6 @@ import { InvoicesService } from './invoices.service';
   imports: [WhatsAppModule, StorageModule],
   controllers: [InvoicesController],
   providers: [InvoicesService],
+  exports: [InvoicesService],
 })
 export class InvoicesModule {}

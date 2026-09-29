@@ -200,8 +200,17 @@ model BusinessSetting {
   gstEnabled    Boolean @default(false)
   gstRate       Float   @default(0)
   gstin         String?
+  taxLabel      String  @default("GST")
   invoicePrefix String  @default("INV")
   nextInvoiceNo Int     @default(1)
+
+  bankName          String?
+  bankAccountName   String?
+  bankAccountNumber String?
+  bankIfscSwift     String?
+  bankUpiId         String?
+  invoiceTerms      String?
+  invoiceNotes      String?
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
