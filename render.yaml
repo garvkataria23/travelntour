@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: flyconnect-api-fallback
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: npm ci && npx prisma generate && npm run build
+    startCommand: npx prisma migrate deploy && node dist/main
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_URL
+        value: https://travel-omega-ashy.vercel.app,https://129.159.16.165.sslip.io
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 15m
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
+      - key: ALLOW_PUBLIC_REGISTRATION
+        value: "false"
+      - key: WHATSAPP_MOCK
+        value: "true"
+      - key: CURRENCY_BASE
+        value: AED
