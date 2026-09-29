@@ -180,23 +180,13 @@ export function getGDriveAuth() {
  */
 export async function connectGoogleDrive(): Promise<{ user: User; accessToken: string | null }> {
   try {
-    const result = await signInWithPopup(auth, googleDriveProvider);
+    const result = await signInWithPopup(auth, googleProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     return {
       user: result.user,
       accessToken: credential?.accessToken ?? null,
     };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "";
-    // If drive.file scope is rejected by Google OAuth policy, fallback to standard google provider
-    if (msg.includes("scope") || msg.includes("access_denied") || msg.includes("invalid_scope")) {
-      const fallbackResult = await signInWithPopup(auth, googleProvider);
-      const fallbackCred = GoogleAuthProvider.credentialFromResult(fallbackResult);
-      return {
-        user: fallbackResult.user,
-        accessToken: fallbackCred?.accessToken ?? null,
-      };
-    }
     throw err;
   }
 }
