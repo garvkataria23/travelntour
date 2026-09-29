@@ -8,6 +8,7 @@ import { api, clearSession, formatDate, getAccessToken, getStoredUser, type ApiU
 import { useApi, useOffline } from "@/lib/hooks";
 import { CurrencyProvider, useCurrency } from "@/lib/currency";
 import { logOut as firebaseLogOut } from "@/lib/firebase";
+import { CollaboratorPresence } from "@/components/collaborator-presence";
 
 const NAV_ITEMS: Array<{ label: string; href: string; icon: LucideIcon }> = [
   { label: "Dashboard", href: "/dashboard", icon: Home },
@@ -157,7 +158,8 @@ function Topbar({ onMenu, user, businessName, onLogout }: { onMenu: () => void; 
         <button className="rounded-lg border border-slate-200 p-2 lg:hidden" onClick={onMenu} type="button"><Menu className="h-5 w-5" /></button>
         <GlobalSearch />
       </div>
-      <div className="ml-3 flex items-center gap-3 sm:gap-5">
+      <div className="ml-3 flex items-center gap-2 sm:gap-4">
+        <CollaboratorPresence />
         <CurrencyToggle />
         <NotificationsBell />
         <AccountMenu user={user} businessName={businessName} onLogout={onLogout} />

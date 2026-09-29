@@ -1,9 +1,10 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { Pagination, StatCard, initialsOf } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
+import { useLiveHighlights } from "@/lib/sync";
 import { api, formatCurrency, formatDate, statusTone } from "@/lib/api";
 import { useDisplayCurrency } from "@/lib/currency";
 import { AlertTriangle, CalendarDays, Edit, Mail, MessageCircle, MoreHorizontal, Phone, Plane, Plus, Repeat, Search, UserCheck, Users, UserX, X } from "lucide-react";
@@ -220,6 +221,7 @@ export default function CustomersPage() {
   const stats = useApi<CustomerStats>("/customers/stats", { refetchInterval: POLL_MS });
   const list = useApi<CustomerList>(`/customers?${params.toString()}`, { refetchInterval: POLL_MS });
   const panel = useApi<CustomerDetail>(selectedId ? `/customers/${selectedId}` : null, { refetchInterval: POLL_MS });
+  const liveHighlights = useLiveHighlights("customers");
 
   useEffect(() => {
     if (list.data?.items.length && !pickedRef.current) {
@@ -273,7 +275,57 @@ export default function CustomersPage() {
               <div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-[#f4f7fb]"><tr><th>Customer</th><th>Contact</th><th>Total Bookings</th><th>Last Journey</th><th>Status</th><th>Actions</th></tr></thead><tbody className="divide-y divide-[#e5edf6]">
                 {list.loading && rows.length === 0 ? <tr><td colSpan={7} className="px-5 py-8 text-center text-[#596782]">Loading customers...</td></tr> : null}
                 {!list.loading && rows.length === 0 ? <tr><td colSpan={7} className="px-5 py-8 text-center text-[#596782]">No customers found.</td></tr> : null}
-                {rows.map((c, i) => <tr key={c.id} onClick={() => setSelectedId(c.id)} className={`cursor-pointer ${selectedId === c.id ? "bg-blue-50/60" : "hover:bg-blue-50/30"}`}><td><Link href={`/customers/${c.id}`} className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}><span className={`grid h-10 w-10 place-items-center rounded-full font-bold text-blue-700 ${i % 2 ? "bg-purple-100" : "bg-blue-100"}`}>{c.initials}</span><span><b>{c.name}</b></span></Link></td><td><div>{c.phone}</div><div className="text-[#526282]">{c.email || "—"}</div></td><td>{c.bookings}</td><td className="whitespace-pre-line">{c.last}</td><td><CustomerBadge status={c.status} /></td><td onClick={(e) => e.stopPropagation()}><div className="relative"><button onClick={() => setMenuOpen(menuOpen === c.id ? null : c.id)} className="grid h-10 w-10 place-items-center rounded-lg border border-[#d4dfed]"><MoreHorizontal className="h-4 w-4" /></button>{menuOpen === c.id ? <><div className="fixed inset-0 z-10" onClick={() => setMenuOpen(null)} /><div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-lg border border-[#d6e1ef] bg-white py-1 shadow-lg"><Link href={`/customers/${c.id}`} onClick={() => setMenuOpen(null)} className="block px-3 py-2 text-sm font-medium hover:bg-blue-50">View profile</Link><button onClick={() => { setMenuOpen(null); setEditRow(list.data?.items.find((x) => x.id === c.id) ?? null); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium hover:bg-blue-50"><Edit className="h-4 w-4" /> Edit</button><button onClick={() => { setMenuOpen(null); setDeleteRow(list.data?.items.find((x) => x.id === c.id) ?? null); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50"><AlertTriangle className="h-4 w-4" /> Delete</button></div></> : null}</div></td></tr>)}
+                {rows.map((c, i) => {
+                  const isHighlighted = liveHighlights.has(c.id);
+                  return (
+                    <tr
+                      key={c.id}
+                      onClick={() => setSelectedId(c.id)}
+                      className={`cursor-pointer transition-all duration-700 ${
+                        isHighlighted
+                          ? "bg-emerald-50/90 ring-1 ring-inset ring-emerald-400"
+                          : selectedId === c.id
+                          ? "bg-blue-50/60"
+                          : "hover:bg-blue-50/30"
+                      }`}
+                    >
+                      <td>
+                        <Link href={`/customers/${c.id}`} className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                          <span className={`grid h-10 w-10 place-items-center rounded-full font-bold text-blue-700 ${i % 2 ? "bg-purple-100" : "bg-blue-100"}`}>{c.initials}</span>
+                          <span className="flex items-center gap-1.5">
+                            <b>{c.name}</b>
+                            {isHighlighted && (
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.2 text-[9px] font-extrabold text-emerald-800 animate-pulse">
+                                ● Live Edit
+                              </span>
+                            )}
+                          </span>
+                        </Link>
+                      </td>
+                      <td><div>{c.phone}</div><div className="text-[#526282]">{c.email || "—"}</div></td>
+                      <td>{c.bookings}</td>
+                      <td className="whitespace-pre-line">{c.last}</td>
+                      <td><CustomerBadge status={c.status} /></td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div className="relative">
+                          <button onClick={() => setMenuOpen(menuOpen === c.id ? null : c.id)} className="grid h-10 w-10 place-items-center rounded-lg border border-[#d4dfed]">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                          {menuOpen === c.id ? (
+                            <>
+                              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(null)} />
+                              <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-lg border border-[#d6e1ef] bg-white py-1 shadow-lg">
+                                <Link href={`/customers/${c.id}`} onClick={() => setMenuOpen(null)} className="block px-3 py-2 text-sm font-medium hover:bg-blue-50">View profile</Link>
+                                <button onClick={() => { setMenuOpen(null); setEditRow(list.data?.items.find((x) => x.id === c.id) ?? null); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium hover:bg-blue-50"><Edit className="h-4 w-4" /> Edit</button>
+                                <button onClick={() => { setMenuOpen(null); setDeleteRow(list.data?.items.find((x) => x.id === c.id) ?? null); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50"><AlertTriangle className="h-4 w-4" /> Delete</button>
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody></table></div>
               <Pagination total={list.data?.meta.total} page={list.data?.meta.page ?? 1} limit={8} onPageChange={(p) => setPage(p)} />
             </section>

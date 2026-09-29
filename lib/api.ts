@@ -115,7 +115,7 @@ function cacheKey(method: string, path: string): string {
   return `${method}:${path}`;
 }
 
-function baseOf(path: string): string {
+export function baseOf(path: string): string {
   const seg = path.split("?")[0].split("/").filter(Boolean);
   return "/" + (seg.length >= 2 ? seg.slice(0, 2).join("/") : seg[0] ?? "root");
 }
@@ -160,6 +160,14 @@ function invalidate(keyPrefix: string): void {
   } catch {
     /* ignore */
   }
+}
+
+export function invalidateCache(keyPrefix?: string): void {
+  if (!keyPrefix) {
+    memCache.clear();
+    return;
+  }
+  invalidate(keyPrefix);
 }
 
 let refreshPromise: Promise<boolean> | null = null;
@@ -314,6 +322,33 @@ export async function api<T>(path: string, options: ApiRequestOptions = {}): Pro
   if (method !== "GET") {
     invalidate(baseOf(path));
     invalidate("/reports/overview");
+
+    // Seamless real-time broadcast across all open tabs and active users
+    if (typeof window !== "undefined") {
+      import("./sync")
+        .then(({ broadcastLiveSync }) => {
+          const seg = path.split("?")[0].split("/").filter(Boolean)[0] || "general";
+          const entityMap: Record<string, string> = {
+            bookings: "bookings",
+            customers: "customers",
+            invoices: "invoices",
+            expenses: "expenses",
+            incomes: "income",
+            templates: "templates",
+            settings: "settings",
+          };
+          const entity = (entityMap[seg] || "general") as any;
+          const action = method === "POST" ? "CREATE" : method === "DELETE" ? "DELETE" : "UPDATE";
+          const entityId = path.split("?")[0].split("/").filter(Boolean)[1] || undefined;
+          broadcastLiveSync({
+            entity,
+            action,
+            entityId,
+            data: body && typeof body === "object" ? (body as Record<string, unknown>) : undefined,
+          }).catch(() => {});
+        })
+        .catch(() => {});
+    }
   }
   emitBackendStatus(true);
   return data;

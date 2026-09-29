@@ -107,6 +107,32 @@ rules_version = '2';
 //   - createdAt: timestamp (optional, immutable) - Entry creation timestamp
 //   - updatedAt: timestamp (optional) - Modification timestamp
 //
+// Collection: sync_events (subcollection: /businesses/{businessId}/sync_events/{eventId})
+// Document ID: eventId
+// Fields:
+//   - id: string (required, 1-64 chars, immutable) - Unique event identifier matching document ID
+//   - businessId: string (required, 1-64 chars, immutable) - Tenant business ID matching parent businessId
+//   - entity: string (required, enum: 'bookings' | 'customers' | 'invoices' | 'expenses' | 'income' | 'settings' | 'general') - Target entity domain
+//   - action: string (required, enum: 'CREATE' | 'UPDATE' | 'DELETE' | 'STATUS_CHANGE') - Mutation action type
+//   - entityId: string (required, 1-64 chars) - Identifier of the entity being mutated
+//   - authorName: string (required, 1-100 chars) - Name of user who performed the action
+//   - authorEmail: string (required, valid email, max 120 chars) - Email of author
+//   - timestamp: number or timestamp (required, positive) - Epoch millisecond timestamp or Firestore timestamp
+//   - createdAt: timestamp (optional, immutable) - Server creation timestamp
+//
+// Collection: presence (subcollection: /businesses/{businessId}/presence/{userId})
+// Document ID: userId (matches Firebase Auth UID)
+// Fields:
+//   - userId: string (required, 1-128 chars, immutable) - User ID matching document key and auth UID
+//   - businessId: string (required, 1-64 chars, immutable) - Tenant business ID matching parent businessId
+//   - name: string (required, 1-100 chars) - Active user display name
+//   - email: string (required, valid email, max 120 chars) - Active user email address
+//   - role: string (required, 1-50 chars) - User role within tenant
+//   - currentPage: string (required, 1-200 chars) - Current route or application page viewed
+//   - lastSeen: number or timestamp (required, positive) - Heartbeat timestamp
+//   - color: string (optional, 1-30 chars) - UI collaborator avatar color
+//   - updatedAt: timestamp (optional) - Server heartbeat update timestamp
+//
 // ===============================================================
 
 service cloud.firestore {
@@ -332,6 +358,34 @@ service cloud.firestore {
         isValidOptionalTimestamp('updatedAt');
     }
 
+    function isValidSyncEvent(data) {
+      return hasOnlyAllowedFields(['id', 'businessId', 'entity', 'action', 'entityId', 'authorName', 'authorEmail', 'timestamp', 'createdAt']) &&
+        hasRequiredFields(['id', 'businessId', 'entity', 'action', 'entityId', 'authorName', 'authorEmail', 'timestamp']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
+        data.entity in ['bookings', 'customers', 'invoices', 'expenses', 'income', 'settings', 'general'] &&
+        data.action in ['CREATE', 'UPDATE', 'DELETE', 'STATUS_CHANGE'] &&
+        data.entityId is string && data.entityId.size() >= 1 && data.entityId.size() <= 64 &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 100 &&
+        data.authorEmail is string && isValidEmail(data.authorEmail) &&
+        ((data.timestamp is number && data.timestamp > 0) || data.timestamp is timestamp) &&
+        isValidOptionalTimestamp('createdAt');
+    }
+
+    function isValidPresence(data) {
+      return hasOnlyAllowedFields(['userId', 'businessId', 'name', 'email', 'role', 'currentPage', 'lastSeen', 'color', 'updatedAt']) &&
+        hasRequiredFields(['userId', 'businessId', 'name', 'email', 'role', 'currentPage', 'lastSeen']) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.email is string && isValidEmail(data.email) &&
+        data.role is string && data.role.size() >= 1 && data.role.size() <= 50 &&
+        data.currentPage is string && data.currentPage.size() >= 1 && data.currentPage.size() <= 200 &&
+        ((data.lastSeen is number && data.lastSeen > 0) || data.lastSeen is timestamp) &&
+        isValidOptionalString('color', 1, 30) &&
+        isValidOptionalTimestamp('updatedAt');
+    }
+
     // ===============================================================
     // Collection Rules
     // ===============================================================
@@ -489,6 +543,41 @@ service cloud.firestore {
 
       allow delete: if isAuthenticated() &&
         (isTenantAdmin(resource.data.businessId) || isSuperAdmin());
+    }
+
+    // 9. Sync Events Subcollection
+    match /businesses/{businessId}/sync_events/{eventId} {
+      allow read: if isTenantMember(businessId);
+
+      allow create: if isTenantMember(businessId) &&
+        isValidSyncEvent(request.resource.data) &&
+        request.resource.data.id == eventId &&
+        request.resource.data.businessId == businessId;
+
+      allow update: if false;
+
+      allow delete: if isTenantMember(businessId);
+    }
+
+    // 10. Presence Subcollection
+    match /businesses/{businessId}/presence/{userId} {
+      allow read: if isTenantMember(businessId);
+
+      allow create: if isTenantMember(businessId) &&
+        request.auth.uid == userId &&
+        isValidPresence(request.resource.data) &&
+        request.resource.data.userId == userId &&
+        request.resource.data.businessId == businessId;
+
+      allow update: if isTenantMember(businessId) &&
+        request.auth.uid == userId &&
+        isValidPresence(request.resource.data) &&
+        areImmutableFieldsUnchanged(['userId', 'businessId']) &&
+        request.resource.data.userId == userId &&
+        request.resource.data.businessId == businessId;
+
+      allow delete: if isTenantMember(businessId) &&
+        request.auth.uid == userId;
     }
   }
 }

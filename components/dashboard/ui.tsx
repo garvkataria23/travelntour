@@ -99,7 +99,7 @@ export function initialsOf(name: string): string {
     .toUpperCase();
 }
 
-export function BookingsTable({ compact = false, rows: apiRows, onView, onCancel, onEdit }: { compact?: boolean; rows: ApiBookingRow[]; onView?: (id: string) => void; onCancel?: (id: string) => void; onEdit?: (id: string) => void }) {
+export function BookingsTable({ compact = false, rows: apiRows, highlightedIds, onView, onCancel, onEdit }: { compact?: boolean; rows: ApiBookingRow[]; highlightedIds?: Set<string>; onView?: (id: string) => void; onCancel?: (id: string) => void; onEdit?: (id: string) => void }) {
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const rows = apiRows.map((row) => {
     const initial = initialsOf(row.customerName);
@@ -131,12 +131,31 @@ export function BookingsTable({ compact = false, rows: apiRows, onView, onCancel
             </tr>
           </thead>
           <tbody className="divide-y divide-[#e5edf6]">
-            {rows.map((row, index) => (
-              <tr key={row.pnr} className="bg-white hover:bg-blue-50/30">
+            {rows.map((row, index) => {
+              const isHighlighted = !!(row.id && highlightedIds?.has(row.id));
+              return (
+              <tr
+                key={row.pnr}
+                className={`transition-all duration-700 ${
+                  isHighlighted
+                    ? "bg-emerald-50/90 ring-1 ring-inset ring-emerald-400"
+                    : "bg-white hover:bg-blue-50/30"
+                }`}
+              >
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-3">
                     {!compact ? <span className={`grid h-9 w-9 place-items-center rounded-full font-bold text-blue-700 ${index % 2 ? "bg-purple-100" : "bg-blue-100"}`}>{row.initials}</span> : null}
-                    <div><div className="font-semibold text-[#071333]">{row.customer}</div>{!compact ? <div className="text-[#526282]">{row.phone}</div> : null}</div>
+                    <div>
+                      <div className="flex items-center gap-1.5 font-semibold text-[#071333]">
+                        <span>{row.customer}</span>
+                        {isHighlighted && (
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.2 text-[9px] font-extrabold text-emerald-800 animate-pulse">
+                            ● Live Edit
+                          </span>
+                        )}
+                      </div>
+                      {!compact ? <div className="text-[#526282]">{row.phone}</div> : null}
+                    </div>
                   </div>
                 </td>
                 <td className="px-3 py-3 font-medium">{row.pnr}</td>
@@ -159,7 +178,8 @@ export function BookingsTable({ compact = false, rows: apiRows, onView, onCancel
                   </div>}
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {rows.length === 0 ? <tr><td colSpan={compact ? 8 : 9} className="px-5 py-8 text-center text-[#596782]">No bookings found.</td></tr> : null}
           </tbody>
         </table>

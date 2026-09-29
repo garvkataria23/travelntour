@@ -1,8 +1,9 @@
-﻿"use client";
+"use client";
 
 import { AppShell } from "@/components/dashboard/app-shell";
 import { BookingFilters, BookingToolbar, BookingsTable, Pagination, StatCard, initialsOf, type ApiBookingRow } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
+import { useLiveHighlights } from "@/lib/sync";
 import { api, formatCurrency, formatDate, isEditConflict } from "@/lib/api";
 import { useDisplayCurrency } from "@/lib/currency";
 import { Plane, CalendarCheck, Users, Hourglass, AlertTriangle, PlaneTakeoff, PlaneLanding, Printer, Pencil, X } from "lucide-react";
@@ -112,6 +113,7 @@ function BookingsPageInner() {
   const airlines = useApi<Array<{ name: string; count: number }>>("/bookings/airlines");
   const list = useApi<BookingList>(`/bookings?${params.toString()}`, { refetchInterval: POLL_MS });
   const detail = useApi<BookingDetail>(viewId ? `/bookings/${viewId}` : null, { refetchInterval: POLL_MS });
+  const liveHighlights = useLiveHighlights("bookings");
 
   useEffect(() => {
     if (!toast) return;
@@ -242,7 +244,7 @@ function BookingsPageInner() {
           onReset={resetFilters}
         />
         <section className="overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-[0_10px_24px_rgba(31,61,105,0.04)]">
-          <BookingsTable rows={list.data?.items ?? []} onView={(id) => setViewId(id)} onCancel={(id) => setCancelId(id)} onEdit={(id) => setEditId(id)} />
+          <BookingsTable highlightedIds={liveHighlights} rows={list.data?.items ?? []} onView={(id) => setViewId(id)} onCancel={(id) => setCancelId(id)} onEdit={(id) => setEditId(id)} />
           <Pagination total={list.data?.meta.total} page={list.data?.meta.page ?? 1} limit={limit} onPageChange={(p) => setPage(p)} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
         </section>
       </div>

@@ -3,6 +3,7 @@
 import { AppShell } from "@/components/dashboard/app-shell";
 import { StatCard } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
+import { useLiveHighlights } from "@/lib/sync";
 import { api, formatCurrency } from "@/lib/api";
 import { useDisplayCurrency } from "@/lib/currency";
 import { FormEvent, useState } from "react";
@@ -40,6 +41,7 @@ export default function IncomePage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const list = useApi<IncomeList>(`/incomes?${search ? `search=${encodeURIComponent(search)}` : ""}${from ? `&from=${encodeURIComponent(from)}` : ""}${to ? `&to=${encodeURIComponent(to)}` : ""}`);
+  const liveHighlights = useLiveHighlights("income");
   const [actionError, setActionError] = useState("");
   const [toast, setToast] = useState("");
 
@@ -104,9 +106,27 @@ export default function IncomePage() {
               <tbody className="divide-y divide-[#e5edf6]">
                 {(list.data?.items ?? []).map((row) => {
                   const meta = CATEGORY_META[row.category] ?? CATEGORY_META.OTHER;
+                  const isHighlighted = liveHighlights.has(row.id);
                   return (
-                    <tr key={row.id} className="bg-white hover:bg-blue-50/30">
-                      <td className="px-4 py-3"><div className="font-semibold text-[#071333]">{row.title}</div>{row.note ? <div className="text-[#65728a]">{row.note}</div> : null}</td>
+                    <tr
+                      key={row.id}
+                      className={`transition-all duration-700 ${
+                        isHighlighted
+                          ? "bg-emerald-50/90 ring-1 ring-inset ring-emerald-400"
+                          : "bg-white hover:bg-blue-50/30"
+                      }`}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5 font-semibold text-[#071333]">
+                          <span>{row.title}</span>
+                          {isHighlighted && (
+                            <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.2 text-[9px] font-extrabold text-emerald-800 animate-pulse">
+                              ● Live Edit
+                            </span>
+                          )}
+                        </div>
+                        {row.note ? <div className="text-[#65728a]">{row.note}</div> : null}
+                      </td>
                       <td className="px-4 py-3"><span className={`inline-flex rounded-md px-2.5 py-1 text-xs font-bold ${meta.cls}`}>{meta.label}</span></td>
                       <td className="px-4 py-3 text-[#405174]">{row.reference ?? "—"}</td>
                       <td className="px-4 py-3 text-[#405174]">{formatDateInput(row.receivedOn)}</td>

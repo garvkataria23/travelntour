@@ -3,6 +3,7 @@
 import { AppShell } from "@/components/dashboard/app-shell";
 import { StatCard } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
+import { useLiveHighlights } from "@/lib/sync";
 import { api, formatCurrency } from "@/lib/api";
 import { useDisplayCurrency } from "@/lib/currency";
 import { useState } from "react";
@@ -70,6 +71,7 @@ export default function InvoicesPage() {
   params.set("limit", String(limit));
 
   const list = useApi<InvoiceList>(`/invoices?${params.toString()}`, { refetchInterval: 15000 });
+  const liveHighlights = useLiveHighlights("invoices");
   const pageIds = list.data?.items.map((row) => row.id) ?? [];
 
   function toggleSelect(id: string) {
@@ -185,20 +187,42 @@ export default function InvoicesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#e5edf6]">
-                {(list.data?.items ?? []).map((row) => (
-                  <tr key={row.id} className={`bg-white hover:bg-blue-50/30 ${selected.includes(row.id) ? "bg-blue-50/50" : ""}`}>
-                    <td className="px-4 py-3"><input type="checkbox" checked={selected.includes(row.id)} onChange={() => toggleSelect(row.id)} aria-label={`Select ${row.invoiceNumber ?? row.pnr}`} className="h-4 w-4 accent-[#1688f9]" /></td>
-                    <td className="px-4 py-3"><div className="font-bold text-[#087df0]">{row.invoiceNumber ?? "—"}</div>{row.due > 0 ? <div className="text-xs text-[#65728a]">due {formatCurrency(row.due, row.currency)}</div> : null}</td>
-                    <td className="px-4 py-3"><div className="font-semibold text-[#071333]">{row.customerName ?? "—"}</div>{row.customerPhone ? <div className="text-[#65728a]">{row.customerPhone}</div> : null}</td>
-                    <td className="px-4 py-3 font-medium">{row.pnr}</td>
-                    <td className="px-4 py-3 text-[#405174]">{row.fromCity || "—"} → {row.toCity || "—"}</td>
-                    <td className="px-4 py-3 text-[#405174]">{formatDate(row.invoiceIssuedAt)}</td>
-                    <td className="px-4 py-3 text-right font-bold text-[#071333]">{formatCurrency(row.total, row.currency)}</td>
-                    <td className="px-4 py-3 text-right font-medium text-[#00a451]">{formatCurrency(row.paidAmount, row.currency)}</td>
-                    <td className="px-4 py-3"><PaymentBadge value={row.paymentStatus} /></td>
-                    <td className="px-4 py-3 text-right"><Link href={`/bookings/${row.id}/invoice`} className="rounded-lg border border-[#d4dfed] px-4 py-2 font-semibold text-[#405174] transition hover:bg-slate-50">View</Link></td>
-                  </tr>
-                ))}
+                {(list.data?.items ?? []).map((row) => {
+                  const isHighlighted = liveHighlights.has(row.id);
+                  return (
+                    <tr
+                      key={row.id}
+                      className={`transition-all duration-700 ${
+                        isHighlighted
+                          ? "bg-emerald-50/90 ring-1 ring-inset ring-emerald-400"
+                          : selected.includes(row.id)
+                          ? "bg-blue-50/50"
+                          : "bg-white hover:bg-blue-50/30"
+                      }`}
+                    >
+                      <td className="px-4 py-3"><input type="checkbox" checked={selected.includes(row.id)} onChange={() => toggleSelect(row.id)} aria-label={`Select ${row.invoiceNumber ?? row.pnr}`} className="h-4 w-4 accent-[#1688f9]" /></td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5 font-bold text-[#087df0]">
+                          <span>{row.invoiceNumber ?? "—"}</span>
+                          {isHighlighted && (
+                            <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.2 text-[9px] font-extrabold text-emerald-800 animate-pulse">
+                              ● Live Edit
+                            </span>
+                          )}
+                        </div>
+                        {row.due > 0 ? <div className="text-xs text-[#65728a]">due {formatCurrency(row.due, row.currency)}</div> : null}
+                      </td>
+                      <td className="px-4 py-3"><div className="font-semibold text-[#071333]">{row.customerName ?? "—"}</div>{row.customerPhone ? <div className="text-[#65728a]">{row.customerPhone}</div> : null}</td>
+                      <td className="px-4 py-3 font-medium">{row.pnr}</td>
+                      <td className="px-4 py-3 text-[#405174]">{row.fromCity || "—"} → {row.toCity || "—"}</td>
+                      <td className="px-4 py-3 text-[#405174]">{formatDate(row.invoiceIssuedAt)}</td>
+                      <td className="px-4 py-3 text-right font-bold text-[#071333]">{formatCurrency(row.total, row.currency)}</td>
+                      <td className="px-4 py-3 text-right font-medium text-[#00a451]">{formatCurrency(row.paidAmount, row.currency)}</td>
+                      <td className="px-4 py-3"><PaymentBadge value={row.paymentStatus} /></td>
+                      <td className="px-4 py-3 text-right"><Link href={`/bookings/${row.id}/invoice`} className="rounded-lg border border-[#d4dfed] px-4 py-2 font-semibold text-[#405174] transition hover:bg-slate-50">View</Link></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

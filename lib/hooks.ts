@@ -81,14 +81,38 @@ export function useApi<T>(path: string | null, options: UseApiOptions = {}) {
     refetch();
   }, [refetch]);
 
-  // Poll on an interval. Requests are deduped and the 5s memory cache in lib/api absorbs
-  // overlapping ticks, so a slow response can never stack up.
+  // Instant Live Sync: refetch immediately when a colleague or another tab mutates data
   useEffect(() => {
-    if (!refetchInterval || !path || !isQuery) return;
+    if (!path || !isQuery) return;
+    let unsubscribe: (() => void) | null = null;
+    import("@/lib/sync").then(({ subscribeToLiveSync }) => {
+      unsubscribe = subscribeToLiveSync((event) => {
+        const seg = path.split("?")[0].split("/").filter(Boolean)[0] || "";
+        const isMatch =
+          event.entity === "general" ||
+          path.includes(event.entity) ||
+          (event.entity === "income" && seg === "incomes") ||
+          (seg === "reports" && ["bookings", "customers", "invoices", "expenses", "income"].includes(event.entity));
+
+        if (isMatch) {
+          refetchRef.current();
+        }
+      });
+    }).catch(() => {});
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [path, isQuery]);
+
+  // Fast adaptive polling fallback: 4s when tab is active & focused, refetchInterval otherwise.
+  useEffect(() => {
+    if (!path || !isQuery) return;
+    const interval = refetchInterval ? Math.min(refetchInterval, 4000) : 5000;
     const id = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
       refetchRef.current();
-    }, refetchInterval);
+    }, interval);
     return () => window.clearInterval(id);
   }, [refetchInterval, path, isQuery]);
 
