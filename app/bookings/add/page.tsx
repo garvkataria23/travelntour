@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { AppShell } from "@/components/dashboard/app-shell";
 import { ArrowRight, Barcode, Building2, CalendarDays, Clock3, Flag, Lightbulb, Mail, MapPin, Plane, User, Users, MessageCircle, BarChart3, CalendarCheck, Zap, ReceiptText } from "lucide-react";
@@ -6,12 +6,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { useCurrency } from "@/lib/currency";
 
 const AIRLINES = ["Air India", "IndiGo", "SpiceJet", "Emirates", "Vistara", "Akasa Air", "Go First"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function AddBookingPage() {
   const router = useRouter();
+  const { money: formatMoney } = useCurrency();
   const [skipAutomation, setSkipAutomation] = useState(false);
   const [generateInvoice, setGenerateInvoice] = useState(false);
   const [invoiceLink, setInvoiceLink] = useState<string | null>(null);
@@ -194,19 +196,14 @@ export default function AddBookingPage() {
             </FormCard>
           </div>
 
-          <aside className="space-y-4">
-            <div className="rounded-xl border border-[#dce7f4] bg-white p-3 shadow-sm">
-              <div className="overflow-hidden rounded-lg bg-[url('/assets/add-booking-card.png')] bg-cover bg-center px-5 pb-7 pt-[120px] text-white">
-                <h3 className="text-xl font-extrabold leading-6">Turn Bookings into<br />Better Journeys</h3>
-                <p className="mt-3 text-sm leading-5">Automatic WhatsApp updates<br />for a smoother travel experience.</p>
-              </div>
-              <div className="mt-5 rounded-lg bg-[#f4f9ff] p-5">
-                <h3 className="mb-4 text-lg font-extrabold">What happens next?</h3>
-                <Timeline />
-              </div>
-              <div className="mt-4 flex gap-3 rounded-lg bg-gradient-to-r from-[#e6faed] to-[#e9f8ee] p-4 text-sm">
-                <Lightbulb className="h-7 w-7 shrink-0 text-[#14aa4a]" />
-                <div><b className="text-[#0d8f39]">Pro Tip</b><p className="mt-1 text-[#49607b]">You only need to enter the details once. Our system takes care of the rest!</p></div>
+          <aside className="space-y-4 lg:sticky lg:top-4 self-start">
+            <BoardingPassTicket values={values} formatMoney={formatMoney} />
+            <div className="rounded-xl border border-[#dce7f4] bg-white p-4 shadow-sm">
+              <h3 className="mb-3 text-base font-extrabold text-slate-800">What happens next?</h3>
+              <Timeline />
+              <div className="mt-4 flex gap-3 rounded-lg bg-gradient-to-r from-[#e6faed] to-[#e9f8ee] p-3 text-xs">
+                <Lightbulb className="h-5 w-5 shrink-0 text-[#14aa4a]" />
+                <div><b className="text-[#0d8f39]">Pro Tip:</b> <span className="text-[#49607b]">Booking updates trigger automated WhatsApp messages instantly based on your automation rules.</span></div>
               </div>
             </div>
           </aside>
@@ -259,4 +256,99 @@ function Timeline() {
     [BarChart3, "Track delivery and status\nin real-time"]
   ] as const;
   return <div className="relative space-y-6 pl-1 before:absolute before:left-[9px] before:top-3 before:h-[152px] before:w-px before:bg-[#b8d7ff]">{items.map(([Icon, text]) => <div key={text} className="relative grid grid-cols-[26px_32px_1fr] items-start gap-3"><span className="relative z-10 mt-1 h-3 w-3 rounded-full bg-[#1688f9]" /><Icon className="h-5 w-5 text-[#1688f9]" /><p className="whitespace-pre-line text-sm leading-5">{text}</p></div>)}</div>;
+}
+
+function BoardingPassTicket({ values, formatMoney }: { values: Record<string, string>; formatMoney: (val: number) => string }) {
+  const pnr = values.pnr.trim() || "PNR123";
+  const passenger = values.name.trim() || "Passenger Name";
+  const airline = values.airline || "Airline";
+  const flight = values.flightNumber.trim() || "FLIGHT";
+  const from = values.from.trim() || "ORIGIN";
+  const to = values.to.trim() || "DEST";
+  const date = values.departureDate || "YYYY-MM-DD";
+  const time = values.departureTime.trim() || "--:--";
+  const terminal = values.terminal.trim() || "TBA";
+  const amount = Number(values.amount) || 0;
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-blue-200/80 bg-gradient-to-b from-white to-[#f7faff] p-5 shadow-lg shadow-blue-500/5">
+      {/* Top Banner */}
+      <div className="flex items-center justify-between border-b border-dashed border-blue-200 pb-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0d6ecc] text-white shadow-sm">
+            <Plane className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-blue-900">{airline}</div>
+            <div className="text-[11px] font-medium text-slate-500">{flight}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          LIVE TICKET PREVIEW
+        </div>
+      </div>
+
+      {/* Flight Route */}
+      <div className="my-4 flex items-center justify-between">
+        <div className="max-w-[42%]">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Departure</div>
+          <div className="truncate text-base font-extrabold text-slate-900">{from}</div>
+        </div>
+        <div className="flex flex-1 flex-col items-center px-2">
+          <div className="relative flex w-full items-center justify-center">
+            <div className="h-[2px] w-full bg-blue-200" />
+            <Plane className="absolute text-[#0d6ecc] h-4 w-4 rotate-90 bg-white px-0.5" />
+          </div>
+          <span className="mt-1 text-[10px] font-semibold text-[#0d6ecc]">{time}</span>
+        </div>
+        <div className="max-w-[42%] text-right">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Destination</div>
+          <div className="truncate text-base font-extrabold text-slate-900">{to}</div>
+        </div>
+      </div>
+
+      {/* Passenger & Details Grid */}
+      <div className="grid grid-cols-2 gap-3 rounded-xl bg-blue-50/60 p-3 text-xs">
+        <div>
+          <span className="block text-[10px] font-semibold uppercase text-slate-400">Passenger</span>
+          <span className="font-bold text-slate-900 truncate block">{passenger}</span>
+        </div>
+        <div>
+          <span className="block text-[10px] font-semibold uppercase text-slate-400">PNR Reference</span>
+          <span className="font-mono font-bold text-[#0d6ecc] tracking-wider">{pnr}</span>
+        </div>
+        <div>
+          <span className="block text-[10px] font-semibold uppercase text-slate-400">Date</span>
+          <span className="font-semibold text-slate-800">{date}</span>
+        </div>
+        <div>
+          <span className="block text-[10px] font-semibold uppercase text-slate-400">Terminal</span>
+          <span className="font-semibold text-slate-800">{terminal}</span>
+        </div>
+      </div>
+
+      {/* Total Amount / Fare */}
+      {amount > 0 ? (
+        <div className="mt-3 flex items-center justify-between rounded-lg border border-blue-100 bg-white px-3 py-2 text-xs">
+          <span className="font-semibold text-slate-600">Total Fare:</span>
+          <span className="font-extrabold text-[#0d6ecc] text-sm tabular-nums">
+            {formatMoney(amount)}
+          </span>
+        </div>
+      ) : null}
+
+      {/* Barcode Strip */}
+      <div className="mt-4 flex flex-col items-center justify-center border-t border-dashed border-blue-200 pt-3">
+        <div className="flex h-7 items-center gap-1 opacity-70">
+          {[4, 2, 6, 2, 4, 8, 3, 5, 2, 6, 4, 2, 5, 3, 7, 2, 4, 3, 6, 2].map((w, idx) => (
+            <div key={idx} className="bg-slate-800 h-full" style={{ width: `${w}px` }} />
+          ))}
+        </div>
+        <div className="mt-1 font-mono text-[10px] font-semibold tracking-widest text-slate-500 uppercase">
+          {pnr} • ETKT VERIFIED
+        </div>
+      </div>
+    </div>
+  );
 }

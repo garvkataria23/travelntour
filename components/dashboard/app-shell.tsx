@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { AlertTriangle, Banknote, BarChart3, Bell, CalendarCheck, Check, ChevronDown, Clock3, Command, FileText, Home, LogOut, Menu, MessageCircle, Plane, Plus, Receipt, RefreshCw, Search, Settings, Users, Wallet, Workflow, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Banknote, BarChart3, Bell, CalendarCheck, Check, ChevronDown, Clock3, Command, FileText, Home, LogOut, Menu, MessageCircle, PanelLeftClose, PanelLeftOpen, Plane, Plus, Receipt, RefreshCw, Search, Settings, Users, Wallet, Workflow, X, type LucideIcon } from "lucide-react";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { api, clearSession, formatDate, getAccessToken, getStoredUser, type ApiUser } from "@/lib/api";
 import { useApi, useOffline } from "@/lib/hooks";
@@ -10,31 +10,80 @@ import { CurrencyProvider, useCurrency } from "@/lib/currency";
 import { logOut as firebaseLogOut } from "@/lib/firebase";
 import { CollaboratorPresence } from "@/components/collaborator-presence";
 
-const NAV_ITEMS: Array<{ label: string; href: string; icon: LucideIcon }> = [
-  { label: "Dashboard", href: "/dashboard", icon: Home },
-  { label: "Bookings", href: "/bookings", icon: Plane },
-  { label: "Add Booking", href: "/bookings/add", icon: Plus },
-  { label: "Upcoming Journeys", href: "/upcoming-journeys", icon: CalendarCheck },
-  { label: "Customers", href: "/customers", icon: Users },
-  { label: "WhatsApp Messages", href: "/whatsapp-messages", icon: MessageCircle },
-  { label: "Automation", href: "/automation", icon: Settings },
-  { label: "Message Templates", href: "/message-templates", icon: FileText },
-  { label: "Reports", href: "/reports", icon: BarChart3 },
-  { label: "Invoices", href: "/invoices", icon: Receipt },
-  { label: "Expenses", href: "/expenses", icon: Wallet },
-  { label: "Income", href: "/income", icon: Banknote },
-  { label: "Currency", href: "/currency", icon: RefreshCw },
-  { label: "Settings", href: "/settings", icon: Workflow },
+export interface NavGroup {
+  title: string;
+  items: Array<{ label: string; href: string; icon: LucideIcon }>;
+}
+
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    title: "Operations",
+    items: [
+      { label: "Dashboard", href: "/dashboard", icon: Home },
+      { label: "Bookings", href: "/bookings", icon: Plane },
+      { label: "Add Booking", href: "/bookings/add", icon: Plus },
+      { label: "Upcoming Journeys", href: "/upcoming-journeys", icon: CalendarCheck },
+    ],
+  },
+  {
+    title: "Communications",
+    items: [
+      { label: "Customers", href: "/customers", icon: Users },
+      { label: "WhatsApp Messages", href: "/whatsapp-messages", icon: MessageCircle },
+      { label: "Automation", href: "/automation", icon: Settings },
+      { label: "Message Templates", href: "/message-templates", icon: FileText },
+    ],
+  },
+  {
+    title: "Financials",
+    items: [
+      { label: "Reports", href: "/reports", icon: BarChart3 },
+      { label: "Invoices", href: "/invoices", icon: Receipt },
+      { label: "Expenses", href: "/expenses", icon: Wallet },
+      { label: "Income", href: "/income", icon: Banknote },
+      { label: "Currency", href: "/currency", icon: RefreshCw },
+    ],
+  },
+  {
+    title: "System",
+    items: [
+      { label: "Settings", href: "/settings", icon: Workflow },
+    ],
+  },
 ];
+
+export const NAV_ITEMS = NAV_GROUPS.flatMap((g) => g.items);
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
   const [railHover, setRailHover] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [user, setUser] = useState<ApiUser | null>(null);
   const router = useRouter();
   const me = useApi<{ business?: { id?: string; name?: string | null; currency?: string | null } }>("/settings");
   const offline = useOffline();
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedPin = window.localStorage.getItem("fc_sidebar_pinned");
+      if (savedPin !== null) {
+        setPinned(savedPin === "1");
+      } else if (window.innerWidth >= 1536) {
+        setPinned(true);
+      }
+    }
+  }, []);
+
+  const togglePin = () => {
+    setPinned((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("fc_sidebar_pinned", next ? "1" : "0");
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (me.data?.business?.id && typeof window !== "undefined") {
@@ -59,12 +108,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (!user) return null;
 
   const businessName = me.data?.business?.name || user.name;
+  const paddingLeft = pinned ? "lg:pl-[240px]" : "lg:pl-[72px]";
 
   return (
     <CurrencyProvider businessCurrency={me.data?.business?.currency}>
       <div className="flyconnect-app min-h-screen bg-[#f4f9ff] text-[#08142e]">
-        <Sidebar open={open} onClose={() => setOpen(false)} user={user} onLogout={() => setLogoutOpen(true)} expanded={railHover} onHoverChange={setRailHover} />
-        <div className={`min-h-screen transition-[padding] duration-200 ${railHover ? "lg:pl-[237px]" : "lg:pl-[76px]"}`}>
+        <Sidebar
+          open={open}
+          onClose={() => setOpen(false)}
+          user={user}
+          onLogout={() => setLogoutOpen(true)}
+          pinned={pinned}
+          onTogglePin={togglePin}
+          hovered={railHover}
+          onHoverChange={setRailHover}
+        />
+        <div className={`min-h-screen transition-[padding] duration-200 ${paddingLeft}`}>
           <Topbar onMenu={() => setOpen(true)} user={user} businessName={businessName} onLogout={() => setLogoutOpen(true)} />
           {offline ? (
             <div className="flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm font-semibold text-amber-800" role="status">
@@ -72,7 +131,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               Offline — showing saved data. Reconnecting…
             </div>
           ) : null}
-          <main className="px-4 py-4 sm:px-6 lg:px-5 xl:px-8">{children}</main>
+          <main className="mx-auto w-full max-w-[1720px] px-3.5 py-4 sm:px-6 lg:px-6 xl:px-8 2xl:px-10">{children}</main>
         </div>
         <LogoutDialog
           open={logoutOpen}
@@ -98,9 +157,27 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-function Sidebar({ open, onClose, user, onLogout, expanded, onHoverChange }: { open: boolean; onClose: () => void; user: ApiUser; onLogout: () => void; expanded: boolean; onHoverChange: (value: boolean) => void }) {
+function Sidebar({
+  open,
+  onClose,
+  user,
+  onLogout,
+  pinned,
+  onTogglePin,
+  hovered,
+  onHoverChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  user: ApiUser;
+  onLogout: () => void;
+  pinned: boolean;
+  onTogglePin: () => void;
+  hovered: boolean;
+  onHoverChange: (value: boolean) => void;
+}) {
   const pathname = usePathname();
-  const full = expanded || open;
+  const full = pinned || hovered || open;
   const initials = (user.name || user.email || "?")
     .split(/\s+/)
     .map((part) => part[0])
@@ -111,49 +188,123 @@ function Sidebar({ open, onClose, user, onLogout, expanded, onHoverChange }: { o
 
   return (
     <>
-      <div className={`fixed inset-0 z-40 bg-slate-950/50 transition lg:hidden ${open ? "opacity-100" : "pointer-events-none opacity-0"}`} onClick={onClose} />
+      <div
+        className={`fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-xs transition lg:hidden ${
+          open ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        onClick={onClose}
+      />
       <aside
-        onMouseEnter={() => onHoverChange(true)}
-        onMouseLeave={() => onHoverChange(false)}
-        className={`fixed inset-y-0 left-0 z-50 flex w-[237px] flex-col overflow-hidden bg-[#071832] text-white shadow-2xl transition-[width,transform] duration-200 lg:translate-x-0 ${expanded ? "lg:w-[237px]" : "lg:w-[76px]"} ${open ? "translate-x-0" : "-translate-x-full"}`}
+        onMouseEnter={() => !pinned && onHoverChange(true)}
+        onMouseLeave={() => !pinned && onHoverChange(false)}
+        className={`fixed inset-y-0 left-0 z-50 flex flex-col overflow-hidden bg-[#071832] text-white shadow-2xl transition-[width,transform] duration-200 lg:translate-x-0 ${
+          pinned ? "lg:w-[240px]" : hovered ? "lg:w-[240px] lg:shadow-[6px_0_28px_rgba(0,0,0,0.4)]" : "lg:w-[72px]"
+        } ${open ? "w-[240px] translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
-        <div className={`flex h-[68px] items-center ${full ? "justify-between" : "justify-center"} px-[17px]`}>
-          <Link href="/dashboard" className="flex items-center gap-2" onClick={onClose}>
-            <Plane className="h-10 w-10 -rotate-45 fill-[#218bf3] stroke-[#218bf3] stroke-[1.5]" />
+        <div className={`flex h-[64px] items-center ${full ? "justify-between" : "justify-center"} border-b border-white/8 px-4`}>
+          <Link href="/dashboard" className="flex items-center gap-2.5" onClick={onClose}>
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[#218bf3] to-[#1268c7] shadow-md shadow-[#218bf3]/20">
+              <Plane className="h-6 w-6 -rotate-45 fill-white stroke-white" />
+            </div>
             {full ? (
-              <div>
-                <div className="text-[20px] font-extrabold leading-none tracking-[-0.04em]">Fly<span className="text-[#2494ff]">Connect</span></div>
-                <div className="mt-[6px] text-[8px] font-bold uppercase tracking-[0.1em] text-white/75">Travel Smarter, Together</div>
+              <div className="overflow-hidden">
+                <div className="text-[19px] font-extrabold leading-none tracking-[-0.03em]">
+                  Fly<span className="text-[#38bdf8]">Connect</span>
+                </div>
+                <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400">
+                  Agency Workspace
+                </div>
               </div>
             ) : null}
           </Link>
-          {full ? <button className="lg:hidden" onClick={onClose} type="button"><X className="h-5 w-5" /></button> : null}
+          {full ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={onTogglePin}
+                title={pinned ? "Collapse sidebar" : "Pin sidebar"}
+                aria-label={pinned ? "Collapse sidebar" : "Pin sidebar"}
+                className="hidden rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white lg:inline-flex"
+              >
+                {pinned ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+              </button>
+              <button className="rounded-lg p-1.5 text-slate-400 hover:text-white lg:hidden" onClick={onClose} type="button">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          ) : null}
         </div>
 
-        <nav className="no-scrollbar mt-1 flex-1 space-y-[3px] overflow-y-auto px-2">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const active = pathname === item.href || (item.href === "/bookings" && pathname.startsWith("/bookings") && pathname !== "/bookings/add") || (item.href === "/bookings/add" && pathname === "/bookings/add");
-            return (
-              <Link key={item.href} href={item.href} onClick={onClose} className={`group relative flex h-[38px] items-center rounded-lg text-[16px] transition ${full ? "gap-4 px-4" : "justify-center px-2"} ${active ? "bg-[#213965] text-white" : "text-[#d8e3f4] hover:bg-white/8 hover:text-white"}`}>
-                {active ? <span className="absolute left-0 top-0 h-full w-1 rounded-r bg-[#2a95ff]" /> : null}
-                <Icon className={`h-[21px] w-[21px] shrink-0 ${active ? "text-[#58a8ff]" : "text-[#d5e2f8]"}`} />
-                {full ? <span className="truncate">{item.label}</span> : null}
-              </Link>
-            );
-          })}
+        <nav className="no-scrollbar mt-2 flex-1 space-y-3 overflow-y-auto px-2.5 py-1">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.title} className="space-y-0.5">
+              {full ? (
+                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400/90">
+                  {group.title}
+                </div>
+              ) : (
+                <div className="mx-auto my-2 h-px w-8 bg-white/10" />
+              )}
+
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const active =
+                  pathname === item.href ||
+                  (item.href === "/bookings" && pathname.startsWith("/bookings") && pathname !== "/bookings/add") ||
+                  (item.href === "/bookings/add" && pathname === "/bookings/add");
+
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onClose}
+                    title={!full ? item.label : undefined}
+                    className={`group relative flex h-[38px] items-center rounded-lg text-[14px] font-medium transition ${
+                      full ? "gap-3 px-3" : "justify-center px-0"
+                    } ${
+                      active
+                        ? "bg-[#1d4ed8] text-white font-semibold shadow-sm shadow-[#1d4ed8]/40"
+                        : "text-slate-300 hover:bg-white/8 hover:text-white"
+                    }`}
+                  >
+                    {active ? (
+                      <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-full bg-[#60a5fa]" />
+                    ) : null}
+                    <Icon className={`h-[19px] w-[19px] shrink-0 ${active ? "text-white" : "text-slate-400 group-hover:text-white"}`} />
+                    {full ? <span className="truncate">{item.label}</span> : null}
+
+                    {!full ? (
+                      <div className="pointer-events-none absolute left-[68px] z-50 hidden whitespace-nowrap rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white shadow-xl group-hover:block">
+                        {item.label}
+                      </div>
+                    ) : null}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
-        <div className={`mt-auto ${full ? "px-[17px]" : "px-2"} pb-[30px]`}>
-          <div className={`flex items-center ${full ? "gap-3" : "justify-center"}`}>
-            <div className="grid h-10 w-10 place-items-center rounded-full bg-[#d8c8ff] text-[15px] font-bold text-[#171236]">{initials}</div>
+        <div className={`mt-auto border-t border-white/8 ${full ? "p-3" : "py-3 px-2"} bg-[#051329]`}>
+          <div className={`flex items-center ${full ? "gap-2.5" : "justify-center"}`}>
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-indigo-400 to-purple-600 text-[13px] font-bold text-white shadow-sm">
+              {initials}
+            </div>
             {full ? (
               <>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[14px] font-semibold">{user.name}</div>
-                  <div className="capitalize text-[12px] text-white/65">{user.role?.toLowerCase()}</div>
+                  <div className="truncate text-[13px] font-semibold text-white">{user.name}</div>
+                  <div className="truncate text-[11px] capitalize text-slate-400">{user.role?.toLowerCase() || "Agent"}</div>
                 </div>
-                <button aria-label="Log out" onClick={onLogout} type="button"><LogOut className="h-5 w-5 text-white/80" /></button>
+                <button
+                  aria-label="Log out"
+                  onClick={onLogout}
+                  title="Sign out"
+                  type="button"
+                  className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-500/20 hover:text-rose-400"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
               </>
             ) : null}
           </div>
@@ -165,12 +316,21 @@ function Sidebar({ open, onClose, user, onLogout, expanded, onHoverChange }: { o
 
 function Topbar({ onMenu, user, businessName, onLogout }: { onMenu: () => void; user: ApiUser; businessName: string; onLogout: () => void }) {
   return (
-    <header className="sticky top-0 z-30 flex h-[60px] items-center justify-between border-b border-[#d9e4f2] bg-white/95 px-4 backdrop-blur sm:px-6 lg:px-7">
+    <header className="sticky top-0 z-30 flex h-[62px] items-center justify-between border-b border-[#d9e4f2] bg-white/95 px-4 backdrop-blur sm:px-6 lg:px-8">
       <div className="flex flex-1 items-center gap-3">
-        <button className="rounded-lg border border-slate-200 p-2 lg:hidden" onClick={onMenu} type="button"><Menu className="h-5 w-5" /></button>
+        <button className="rounded-lg border border-slate-200 p-2 lg:hidden" onClick={onMenu} type="button">
+          <Menu className="h-5 w-5 text-slate-700" />
+        </button>
         <GlobalSearch />
       </div>
-      <div className="ml-3 flex items-center gap-2 sm:gap-4">
+      <div className="ml-3 flex items-center gap-2 sm:gap-3.5">
+        <Link
+          href="/bookings/add"
+          className="hidden md:inline-flex items-center gap-1.5 rounded-lg bg-[#218bf3] px-3.5 py-2 text-[13px] font-bold text-white shadow-sm shadow-[#218bf3]/25 transition hover:bg-[#127bdc] active:scale-[0.98]"
+        >
+          <Plus className="h-4 w-4 stroke-[2.5]" />
+          <span>New Booking</span>
+        </Link>
         <CollaboratorPresence />
         <CurrencyToggle />
         <NotificationsBell />

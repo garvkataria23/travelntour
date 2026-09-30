@@ -1,10 +1,11 @@
-﻿"use client";
+"use client";
 
 import { AppShell } from "@/components/dashboard/app-shell";
 import { BookingsTable, SectionCard, StatCard } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { formatDate, getStoredUser } from "@/lib/api";
-import { Bell, CalendarCheck, CheckCircle2, MessageCircle, Plane, Users, AlertTriangle, ChevronDown } from "lucide-react";
+import { Bell, CalendarCheck, CheckCircle2, MessageCircle, Plane, Users, AlertTriangle, ChevronDown, Plus } from "lucide-react";
+import Link from "next/link";
 import type { ApiBookingRow } from "@/components/dashboard/ui";
 import { useState } from "react";
 
@@ -46,16 +47,45 @@ export default function DashboardPage() {
   return (
     <AppShell>
       <div className="space-y-4">
-        <section className="relative overflow-hidden rounded-xl bg-gradient-to-r from-[#0e7ae4] via-[#1d8af3] to-[#4aa6ff] px-7 py-9 text-white shadow-sm md:px-9">
-          <div className="absolute inset-0 bg-white/10" />
-          <div className="relative z-10">
-            <p className="text-2xl font-light">{greeting},</p>
-            <h1 className="mt-1 text-[42px] font-extrabold leading-tight tracking-[-0.04em]">{firstName} 👋</h1>
-            <p className="mt-2 text-base text-white/90">Here&apos;s what&apos;s happening with your travel automation today.</p>
+        <section className="relative overflow-hidden rounded-xl border border-blue-200/60 bg-gradient-to-r from-[#0d6ecc] via-[#1a7de8] to-[#3b9bff] px-5 py-4 sm:px-6 sm:py-5 text-white shadow-sm">
+          <div className="relative z-10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-blue-100">
+                  {greeting}
+                </span>
+                <span className="inline-block h-1 w-1 rounded-full bg-blue-200" />
+                <span className="text-xs text-blue-100">
+                  {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                </span>
+              </div>
+              <h1 className="mt-0.5 text-2xl font-extrabold tracking-tight sm:text-3xl">
+                {firstName} 👋
+              </h1>
+              <p className="text-xs text-white/85 sm:text-sm">
+                Here&apos;s what&apos;s happening with your travel automation today.
+              </p>
+            </div>
+            <div className="flex items-center gap-2.5 shrink-0">
+              <Link
+                href="/bookings/add"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-2 text-xs font-bold text-[#0d6ecc] shadow-sm transition hover:bg-blue-50 active:scale-95"
+              >
+                <Plus className="h-4 w-4 stroke-[2.5]" />
+                New Booking
+              </Link>
+              <Link
+                href="/whatsapp-messages"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/30 bg-white/10 px-3.5 py-2 text-xs font-semibold text-white backdrop-blur-xs transition hover:bg-white/20 active:scale-95"
+              >
+                <MessageCircle className="h-4 w-4" />
+                WhatsApp Messages
+              </Link>
+            </div>
           </div>
         </section>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
           <StatCard title="Total Bookings" value={String(stats?.totalBookings ?? 0)} icon={Plane} tone="blue" sub="all bookings" href="/bookings" />
           <StatCard title="Today's Journeys" value={String(stats?.todayJourneys ?? 0)} icon={CalendarCheck} tone="green" sub="departing today" href="/bookings?period=today" />
           <StatCard title="Upcoming Journeys" value={String(stats?.upcomingJourneys ?? 0)} icon={Users} tone="purple" sub="total upcoming" href="/upcoming-journeys" />

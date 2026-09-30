@@ -3,7 +3,7 @@
 import { ArrowRight, Check, Eye, Globe2, LockKeyhole, Mail, Plane, User as UserIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { api, hasActiveSession, setSession } from "@/lib/api";
+import { api, hasActiveSession, setSession, type ApiSession } from "@/lib/api";
 import { signInWithEmail, signUpWithEmail, resetPassword, onAuthChange } from "@/lib/firebase";
 import { getOrCreateUserProfile } from "@/lib/firestore";
 
@@ -83,6 +83,25 @@ export function LoginPage() {
       // 1. Check if user is using legacy/demo bypass
       if (userId.trim() === EASY_ID && password === EASY_PASSWORD) {
         try {
+          const res = await api<ApiSession>("/auth/login", {
+            method: "POST",
+            auth: false,
+            body: { email: userId.trim(), password },
+          });
+          if (res && res.accessToken) {
+            setSession(res, remember);
+            if (res.user?.businessId && typeof window !== "undefined") {
+              window.localStorage.setItem("fc_business_id", res.user.businessId);
+            }
+            setMessage("Demo login successful — signing you in.");
+            setTimeout(() => router.push("/dashboard"), 400);
+            return;
+          }
+        } catch (apiErr) {
+          console.warn("Backend demo login failed, trying Firebase fallback:", apiErr);
+        }
+
+        try {
           const user = await signInWithEmail("demo@flyconnect.app", "aura-demo-password-2026");
           const profile = await getOrCreateUserProfile({
             uid: user.uid,
@@ -123,7 +142,7 @@ export function LoginPage() {
         }
       }
 
-      // 2. Firebase Authentication Flow
+      // 2. Authentication Flow (Backend-First, then Firebase)
       if (mode === "register") {
         const user = await signUpWithEmail(userId.trim(), password);
         const profile = await getOrCreateUserProfile({
@@ -146,6 +165,26 @@ export function LoginPage() {
         setMessage("Account created successfully! Welcome to FlyConnect.");
         setTimeout(() => router.push("/dashboard"), 400);
       } else {
+        // Try backend auth first
+        try {
+          const res = await api<ApiSession>("/auth/login", {
+            method: "POST",
+            auth: false,
+            body: { email: userId.trim(), password },
+          });
+          if (res && res.accessToken) {
+            setSession(res, remember);
+            if (res.user?.businessId && typeof window !== "undefined") {
+              window.localStorage.setItem("fc_business_id", res.user.businessId);
+            }
+            setMessage("Login successful — signing you in.");
+            setTimeout(() => router.push("/dashboard"), 400);
+            return;
+          }
+        } catch {
+          // Fall back to Firebase sign in below
+        }
+
         const user = await signInWithEmail(userId.trim(), password);
         const profile = await getOrCreateUserProfile({
           uid: user.uid,

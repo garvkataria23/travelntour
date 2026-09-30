@@ -91,6 +91,7 @@ function BookingsPageInner() {
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [toast, setToast] = useState("");
   const [actionError, setActionError] = useState("");
+  const [dense, setDense] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search), 400);
@@ -243,8 +244,22 @@ function BookingsPageInner() {
           onTo={(value) => { setTo(value); setPage(1); }}
           onReset={resetFilters}
         />
+        <div className="flex items-center justify-between px-1 pb-1">
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Flight Records</span>
+          <button
+            type="button"
+            onClick={() => setDense((d) => !d)}
+            className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition ${
+              dense
+                ? "border-blue-300 bg-blue-50 text-blue-700 shadow-xs"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            {dense ? "Dense Mode (ON)" : "Comfortable Mode"}
+          </button>
+        </div>
         <section className="overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-[0_10px_24px_rgba(31,61,105,0.04)]">
-          <BookingsTable highlightedIds={liveHighlights} rows={list.data?.items ?? []} onView={(id) => setViewId(id)} onCancel={(id) => setCancelId(id)} onEdit={(id) => setEditId(id)} />
+          <BookingsTable dense={dense} highlightedIds={liveHighlights} rows={list.data?.items ?? []} onView={(id) => setViewId(id)} onCancel={(id) => setCancelId(id)} onEdit={(id) => setEditId(id)} />
           <Pagination total={list.data?.meta.total} page={list.data?.meta.page ?? 1} limit={limit} onPageChange={(p) => setPage(p)} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
         </section>
       </div>
