@@ -339,6 +339,13 @@ export default function AddBookingPage() {
   const [insCoverageEnd, setInsCoverageEnd] = useState("2026-10-30");
   const [insAmount, setInsAmount] = useState("AED 250,000 Comprehensive Medical & Evacuation");
 
+  // Custom / Other Service Fields
+  const [customServiceName, setCustomServiceName] = useState("VIP Airport Meet & Assist / Lounge Access");
+  const [customSupplier, setCustomSupplier] = useState("Marhaba Services Dubai");
+  const [customDate, setCustomDate] = useState("2026-10-15");
+  const [customRef, setCustomRef] = useState("MRH-99218");
+  const [customNotes, setCustomNotes] = useState("Fast-track immigration clearance and terminal 3 premier lounge access.");
+
   // Financials & Billing
   const [sellingPrice, setSellingPrice] = useState("5100");
   const [supplierCost, setSupplierCost] = useState("4200");
@@ -495,7 +502,7 @@ export default function AddBookingPage() {
         setError("Please select a Corporate Company.");
         return false;
       }
-      if (!selectedEmployeeId && companyEmployees.length > 0) {
+      if (!activeEmployee && companyEmployees.length > 0) {
         setError("Please select a Corporate Employee / Traveller.");
         return false;
       }
@@ -815,6 +822,7 @@ export default function AddBookingPage() {
                       Company / Corporate Account <span className="text-rose-500">*</span>
                     </label>
                     <div
+                      data-test="company-dropdown-trigger"
                       onClick={() => setCompanyOpen(!companyOpen)}
                       className="flex h-11 cursor-pointer items-center justify-between rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-800 hover:border-blue-400 focus:border-blue-600"
                     >
@@ -847,6 +855,7 @@ export default function AddBookingPage() {
                           .map((c) => (
                             <div
                               key={c.id}
+                              data-test-company-id={c.id}
                               onClick={() => {
                                 setSelectedCompanyId(c.id);
                                 setCompanyOpen(false);
@@ -890,6 +899,7 @@ export default function AddBookingPage() {
                       Employee / Traveller <span className="text-rose-500">*</span>
                     </label>
                     <div
+                      data-test="employee-dropdown-trigger"
                       onClick={() => setEmployeeOpen(!employeeOpen)}
                       className="flex h-11 cursor-pointer items-center justify-between rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-800 hover:border-blue-400 focus:border-blue-600"
                     >
@@ -939,6 +949,7 @@ export default function AddBookingPage() {
                             .map((e) => (
                               <div
                                 key={e.id}
+                                data-test-employee-id={e.id}
                                 onClick={() => {
                                   setSelectedEmployeeId(e.id);
                                   setEmployeeOpen(false);
@@ -2355,6 +2366,69 @@ export default function AddBookingPage() {
               </div>
             )}
 
+            {/* OTHER / CUSTOM TRAVEL SERVICE */}
+            {service === "OTHER" && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
+                  <HelpCircle className="h-5 w-5 text-indigo-600" />
+                  <h3 className="font-extrabold text-slate-900 text-lg">Custom Travel Service Details</h3>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700">Service Name / Title</label>
+                    <input
+                      type="text"
+                      value={customServiceName}
+                      onChange={(e) => setCustomServiceName(e.target.value)}
+                      placeholder="e.g. VIP Meet & Greet / Helicopter Tour / Luxury Yacht"
+                      className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-medium outline-none focus:border-indigo-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700">Vendor / Supplier</label>
+                    <input
+                      type="text"
+                      value={customSupplier}
+                      onChange={(e) => setCustomSupplier(e.target.value)}
+                      placeholder="e.g. Marhaba Services / Local Tour Operator"
+                      className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-medium outline-none focus:border-indigo-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700">Service Date</label>
+                    <input
+                      type="date"
+                      value={customDate}
+                      onChange={(e) => setCustomDate(e.target.value)}
+                      className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-medium outline-none focus:border-indigo-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700">Confirmation / Voucher Ref #</label>
+                    <input
+                      type="text"
+                      value={customRef}
+                      onChange={(e) => setCustomRef(e.target.value)}
+                      placeholder="e.g. VCH-99214"
+                      className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-mono font-medium outline-none focus:border-indigo-600"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <label className="mb-1 block text-xs font-bold text-slate-700">Detailed Scope & Instructions</label>
+                  <textarea
+                    rows={3}
+                    value={customNotes}
+                    onChange={(e) => setCustomNotes(e.target.value)}
+                    placeholder="Enter special arrangements, client requests, vendor contact info..."
+                    className="w-full rounded-lg border border-slate-300 p-3 text-xs font-medium outline-none focus:border-indigo-600"
+                  />
+                </div>
+              </div>
+            )}
+
             {/* FINANCIALS & CORPORATE BILLING SECTION */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
@@ -2757,7 +2831,7 @@ export default function AddBookingPage() {
 
         {/* ERROR / NOTICE MESSAGES */}
         {error && (
-          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700">
+          <div data-test="error-banner" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700">
             {error}
           </div>
         )}
@@ -2805,6 +2879,7 @@ export default function AddBookingPage() {
             </button>
 
             <button
+              data-test="initiate-save-btn"
               type="button"
               onClick={() => handleInitiateSave("SAVE")}
               disabled={submitting || created}
@@ -2919,6 +2994,7 @@ export default function AddBookingPage() {
                     Edit Details
                   </button>
                   <button
+                    data-test="confirm-save-modal-btn"
                     type="button"
                     onClick={handleConfirmSave}
                     disabled={submitting}
