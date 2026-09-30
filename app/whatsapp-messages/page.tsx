@@ -1,12 +1,20 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { Pagination, StatCard, WhatsAppBadge, initialsOf } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatDate, statusTone } from "@/lib/api";
-import { AlertTriangle, CalendarCheck, Clock3, Download, Eye, MessageCircle, MoreHorizontal, Search, Send, User as UserIcon, X } from "lucide-react";
+import { AlertTriangle, CalendarCheck, Clock3, Download, Eye, Lock, MessageCircle, MoreHorizontal, Search, Send, User as UserIcon, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { WhatsAppQuotaBanner } from "@/components/whatsapp/whatsapp-quota-banner";
+import {
+  checkCanSendWhatsApp,
+  recordMessageSent,
+  QuotaStatus,
+  evaluateQuotaStatus,
+  getStoredQuota,
+} from "@/lib/whatsapp-quota";
 
 interface MessageMeta {
   total: number;
@@ -97,6 +105,19 @@ export default function WhatsAppMessagesPage() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useState("");
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus>(() => evaluateQuotaStatus(getStoredQuota()));
+
+  useEffect(() => {
+    const handleQuotaSync = () => {
+      setQuotaStatus(evaluateQuotaStatus(getStoredQuota()));
+    };
+    window.addEventListener("fc:whatsapp-quota-updated", handleQuotaSync);
+    window.addEventListener("storage", handleQuotaSync);
+    return () => {
+      window.removeEventListener("fc:whatsapp-quota-updated", handleQuotaSync);
+      window.removeEventListener("storage", handleQuotaSync);
+    };
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search), 400);
@@ -144,8 +165,19 @@ export default function WhatsAppMessagesPage() {
 
   async function handleRetry(id: string) {
     setActionError("");
+    const quotaCheck = checkCanSendWhatsApp(1);
+    if (!quotaCheck.allowed) {
+      const err = quotaCheck.error || "WhatsApp message limit reached (1,000 messages). Not a single additional message can be sent. To upgrade your limits, contact Admin.";
+      setActionError(err);
+      return;
+    }
     try {
       await api(`/messages/${id}/retry`, { method: "POST" });
+      try {
+        recordMessageSent(1);
+      } catch (err) {
+        console.warn("Quota record error:", err);
+      }
       setMenuRow(null);
       list.refetch();
       setNotice("Message requeued for delivery.");
@@ -188,8 +220,19 @@ export default function WhatsAppMessagesPage() {
 
   async function handleSend(customerId: string, bookingId: string | undefined, text: string) {
     setActionError("");
+    const quotaCheck = checkCanSendWhatsApp(1);
+    if (!quotaCheck.allowed) {
+      const err = quotaCheck.error || "WhatsApp message limit reached (1,000 messages). Not a single additional message can be sent. To upgrade your limits, contact Admin.";
+      setActionError(err);
+      return null;
+    }
     try {
       const result = await api<{ id: string }>("/messages", { method: "POST", body: { customerId, text, bookingId } });
+      try {
+        recordMessageSent(1);
+      } catch (err) {
+        console.warn("Quota record error:", err);
+      }
       list.refetch();
       setSelectedId(result.id);
       setNotice("Manual message sent.");
@@ -205,11 +248,40 @@ export default function WhatsAppMessagesPage() {
       <div className="space-y-4">
         <div className="flex flex-col justify-between gap-4 pt-2 sm:flex-row sm:items-start">
           <div><h1 className="text-[34px] font-extrabold tracking-[-0.04em]">WhatsApp Messages</h1><p className="text-base text-[#596782]">View all sent messages, delivery status and customer conversations.</p></div>
-          <div className="flex gap-3"><button onClick={handleExport} className="flex h-[52px] items-center gap-3 rounded-lg border border-[#d6e1ef] bg-white px-7 font-semibold"><Download className="h-5 w-5" />Export</button><button onClick={() => setComposeOpen(true)} className="flex h-[52px] items-center gap-3 rounded-lg bg-[#1688f9] px-7 font-bold text-white"><Send className="h-5 w-5" />Send Manual Message</button></div>
+          <div className="flex gap-3">
+            <button onClick={handleExport} className="flex h-[52px] items-center gap-3 rounded-lg border border-[#d6e1ef] bg-white px-7 font-semibold"><Download className="h-5 w-5" />Export</button>
+            <button
+              data-test="send-manual-message-btn"
+              onClick={() => {
+                if (quotaStatus.isBlocked) {
+                  setActionError("WhatsApp message limit reached (1,000 messages). Not a single additional message can be sent until you upgrade. To upgrade your limits, contact Admin.");
+                  return;
+                }
+                setComposeOpen(true);
+              }}
+              disabled={quotaStatus.isBlocked}
+              title={quotaStatus.isBlocked ? "WhatsApp message limit reached (1,000 messages). To upgrade your limits, contact Admin." : "Send Manual Message"}
+              className={`flex h-[52px] items-center gap-3 rounded-lg px-7 font-bold text-white transition ${
+                quotaStatus.isBlocked
+                  ? "bg-slate-400 cursor-not-allowed opacity-75"
+                  : "bg-[#1688f9] hover:bg-[#1170d2]"
+              }`}
+            >
+              {quotaStatus.isBlocked ? <Lock className="h-5 w-5" /> : <Send className="h-5 w-5" />}
+              Send Manual Message
+            </button>
+          </div>
         </div>
         {list.error ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{list.error}</p> : null}
         {actionError ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{actionError}</p> : null}
         {notice ? <p className="rounded-lg bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">{notice}</p> : null}
+
+        {/* WhatsApp Quota & 1,000 Message Limiting Banner */}
+        <WhatsAppQuotaBanner
+          currentApiCount={stats?.total}
+          onQuotaChange={(s) => setQuotaStatus(s)}
+        />
+
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{statCards.map((stat) => <StatCard key={stat.title} {...stat} />)}</div>
         <div className="grid gap-4 xl:grid-cols-[1fr_342px]">
           <section className="overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-sm">
@@ -233,17 +305,27 @@ export default function WhatsAppMessagesPage() {
             {!selectedId ? <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-[#596782]"><span className="grid h-14 w-14 place-items-center rounded-full bg-blue-50"><MessageCircle className="h-6 w-6 text-[#1688f9]" /></span>Select a message to see the conversation and delivery timeline here.</div>
             : panel.loading && !panel.data ? <div className="flex flex-1 items-center justify-center p-8 text-center text-[#596782]">Loading message...</div>
             : panel.error && !panel.data ? <div className="flex flex-1 items-center justify-center p-8 text-center text-[#596782]">{panel.error}</div>
-            : panel.data ? <MessagePanel data={panel.data} onSend={handleSend} onClose={() => setSelectedId(null)} /> : null}
+            : panel.data ? <MessagePanel data={panel.data} onSend={handleSend} onClose={() => setSelectedId(null)} isBlocked={quotaStatus.isBlocked} /> : null}
           </aside>
         </div>
       </div>
 
-      {composeOpen ? <SendComposeModal onClose={() => setComposeOpen(false)} onSent={(id) => { setComposeOpen(false); setSelectedId(id); list.refetch(); setNotice("Manual message sent."); }} /> : null}
+      {composeOpen ? <SendComposeModal onClose={() => setComposeOpen(false)} onSent={(id) => { setComposeOpen(false); setSelectedId(id); list.refetch(); setNotice("Manual message sent."); }} isBlocked={quotaStatus.isBlocked} /> : null}
     </AppShell>
   );
 }
 
-function MessagePanel({ data, onSend, onClose }: { data: MessageDetail; onSend: (customerId: string, bookingId: string | undefined, text: string) => Promise<string | null>; onClose: () => void }) {
+function MessagePanel({
+  data,
+  onSend,
+  onClose,
+  isBlocked = false,
+}: {
+  data: MessageDetail;
+  onSend: (customerId: string, bookingId: string | undefined, text: string) => Promise<string | null>;
+  onClose: () => void;
+  isBlocked?: boolean;
+}) {
   const [tab, setTab] = useState<"conversation" | "timeline">("conversation");
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -252,7 +334,7 @@ function MessagePanel({ data, onSend, onClose }: { data: MessageDetail; onSend: 
   const route = `${(booking?.fromAirport || booking?.fromCity || "—")} → ${(booking?.toAirport || booking?.toCity || "—")}`;
 
   async function submit() {
-    if (!text.trim() || sending || !customer) return;
+    if (!text.trim() || sending || !customer || isBlocked) return;
     setSending(true);
     const ok = await onSend(customer.id, booking?.id ?? undefined, text.trim());
     setSending(false);
@@ -291,9 +373,33 @@ function MessagePanel({ data, onSend, onClose }: { data: MessageDetail; onSend: 
         </div>
       )}
     </div>
+
+    {isBlocked && (
+      <div className="flex items-center gap-2 border-t border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-800">
+        <Lock className="h-4 w-4 shrink-0 text-rose-600" />
+        <span>Messaging locked (1,000 limit reached). To upgrade your limits, contact Admin.</span>
+      </div>
+    )}
+
     <div className="flex items-center gap-2 border-t border-[#d6e1ef] p-3">
-      <div className="flex h-10 flex-1 items-center rounded-lg border border-[#d6e1ef] px-3"><input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} className="min-w-0 flex-1 outline-none" placeholder="Type a message..." /></div>
-      <button onClick={submit} disabled={sending || !text.trim()} className="grid h-10 w-10 place-items-center rounded-lg bg-[#1688f9] text-white disabled:opacity-50"><Send className="h-5 w-5" /></button>
+      <div className="flex h-10 flex-1 items-center rounded-lg border border-[#d6e1ef] px-3 bg-white">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !isBlocked) submit(); }}
+          disabled={isBlocked}
+          className="min-w-0 flex-1 outline-none text-sm disabled:cursor-not-allowed disabled:bg-transparent"
+          placeholder={isBlocked ? "WhatsApp limit reached. Contact Admin to upgrade." : "Type a message..."}
+        />
+      </div>
+      <button
+        onClick={submit}
+        disabled={sending || !text.trim() || isBlocked}
+        title={isBlocked ? "WhatsApp limit reached. Contact Admin to upgrade." : "Send"}
+        className="grid h-10 w-10 place-items-center rounded-lg bg-[#1688f9] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Send className="h-5 w-5" />
+      </button>
     </div>
   </div>;
 }
@@ -302,7 +408,15 @@ function TimelineStep({ time, title, active, danger }: { time: string; title: st
   return <div className="flex gap-3 py-2"><span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${danger ? "bg-rose-500" : active ? "bg-[#1688f9]" : "bg-[#b8c4d8]"}`} /><div className="flex flex-1 justify-between gap-2 text-sm"><b className={danger ? "text-rose-600" : ""}>{title}</b><span className="text-[#596782]">{time}</span></div></div>;
 }
 
-function SendComposeModal({ onClose, onSent }: { onClose: () => void; onSent: (newId: string) => void }) {
+function SendComposeModal({
+  onClose,
+  onSent,
+  isBlocked = false,
+}: {
+  onClose: () => void;
+  onSent: (newId: string) => void;
+  isBlocked?: boolean;
+}) {
   const customers = useApi<CustomerPickList>("/customers?limit=200");
   const [customerId, setCustomerId] = useState("");
   const [text, setText] = useState("");
@@ -311,6 +425,10 @@ function SendComposeModal({ onClose, onSent }: { onClose: () => void; onSent: (n
 
   async function submit() {
     setMError("");
+    if (isBlocked) {
+      setMError("WhatsApp message limit reached (1,000 messages). Not a single additional message can be sent. To upgrade your limits, contact Admin.");
+      return;
+    }
     if (!customerId) { setMError("Select a customer."); return; }
     if (!text.trim()) { setMError("Message cannot be empty."); return; }
     setSending(true);
@@ -327,16 +445,34 @@ function SendComposeModal({ onClose, onSent }: { onClose: () => void; onSent: (n
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-extrabold">Send Manual Message</h2><button onClick={onClose} aria-label="Close"><X className="h-5 w-5 text-[#596782]" /></button></div>
+
+        {isBlocked && (
+          <div className="mb-4 rounded-xl border border-rose-300 bg-rose-50 p-3.5 text-xs text-rose-950 font-medium">
+            <div className="flex items-center gap-1.5 font-extrabold text-rose-800">
+              <Lock className="h-4 w-4 text-rose-600" /> WhatsApp Messaging Strictly Locked
+            </div>
+            <p className="mt-1">
+              You have reached your 1,000 message cap. Not a single additional message will be dispatched.
+            </p>
+            <p className="mt-1 font-bold text-rose-700">
+              To upgrade your limits, contact Admin.
+            </p>
+          </div>
+        )}
+
         <div className="space-y-4">
           <label className="block"><span className="mb-2 block text-sm font-semibold">Customer <span className="text-red-500">*</span></span>
-            <div className="flex h-11 items-center gap-2 rounded-md border border-[#cfdbea] px-3"><UserIcon className="h-5 w-5 text-[#596782]" /><select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="h-11 w-full bg-transparent text-sm outline-none"><option value="">Select customer...</option>{(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}</select></div>
+            <div className="flex h-11 items-center gap-2 rounded-md border border-[#cfdbea] px-3"><UserIcon className="h-5 w-5 text-[#596782]" /><select value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={isBlocked} className="h-11 w-full bg-transparent text-sm outline-none disabled:cursor-not-allowed"><option value="">Select customer...</option>{(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}</select></div>
           </label>
           <label className="block"><span className="mb-2 block text-sm font-semibold">Message <span className="text-red-500">*</span></span>
-            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder="Type the message to send on customer's WhatsApp..." className="w-full rounded-md border border-[#cfdbea] px-3 py-2 text-sm outline-none focus:border-[#1688f9]" />
+            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} disabled={isBlocked} placeholder={isBlocked ? "Messaging locked. To upgrade limits, contact Admin." : "Type the message to send on customer's WhatsApp..."} className="w-full rounded-md border border-[#cfdbea] px-3 py-2 text-sm outline-none focus:border-[#1688f9] disabled:cursor-not-allowed disabled:bg-slate-50" />
           </label>
           <p className="text-xs text-[#596782]">Message is sent immediately via the WhatsApp queue and attached to the customer's latest booking.</p>
           {mError ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{mError}</p> : null}
-          <div className="flex justify-end gap-3 pt-2"><button onClick={onClose} className="rounded-lg border border-[#d6e1ef] bg-white px-6 py-2.5 font-semibold">Cancel</button><button onClick={submit} disabled={sending} className="flex items-center gap-2 rounded-lg bg-[#1688f9] px-6 py-2.5 font-bold text-white disabled:opacity-60">{sending ? "Sending..." : <>Send <Send className="h-4 w-4" /></>}</button></div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button onClick={onClose} className="rounded-lg border border-[#d6e1ef] bg-white px-6 py-2.5 font-semibold">Cancel</button>
+            <button onClick={submit} disabled={sending || isBlocked} className="flex items-center gap-2 rounded-lg bg-[#1688f9] px-6 py-2.5 font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed">{sending ? "Sending..." : <>Send <Send className="h-4 w-4" /></>}</button>
+          </div>
         </div>
       </div>
     </div>

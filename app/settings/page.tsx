@@ -19,12 +19,14 @@ import {
   FileText,
   HardDrive,
   Loader2,
+  MessageCircle,
   ReceiptText,
   RefreshCw,
   ShieldCheck,
   User,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { WhatsAppQuotaBanner } from "@/components/whatsapp/whatsapp-quota-banner";
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
@@ -89,6 +91,7 @@ const TABS = [
   { id: "business", label: "Business Details", icon: Briefcase },
   { id: "gst", label: "Tax & Invoicing", icon: ReceiptText },
   { id: "notifications", label: "Notification Preferences", icon: Bell },
+  { id: "whatsapp", label: "WhatsApp & Limits", icon: MessageCircle },
   { id: "backup", label: "Backup & Cloud", icon: Database },
 ] as const;
 
@@ -966,6 +969,37 @@ export default function SettingsPage() {
                       <Toggle on={prefValue(row.key)} onClick={() => togglePref(row.key)} />
                     </div>
                   ))}
+                </div>
+              </Panel>
+            ) : null}
+
+            {active === "whatsapp" ? (
+              <Panel title="WhatsApp Messaging & Monthly Quota Management">
+                <p className="mb-4 text-sm text-[#596782]">
+                  Monitor WhatsApp delivery limits, configure administrative alerts, and manage message capacity.
+                  Standard limit is 1,000 messages with early warnings at 800 (80%) and 950 (95%).
+                </p>
+
+                <div className="space-y-6">
+                  <WhatsAppQuotaBanner />
+
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+                    <h4 className="font-extrabold text-slate-900 text-sm">Strict Lockout Policy & Multi-Stage Alerts</h4>
+                    <div className="grid gap-3 sm:grid-cols-3 text-xs">
+                      <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3.5">
+                        <span className="font-extrabold text-amber-900 block mb-1">800 Messages (80%)</span>
+                        <p className="text-amber-800 leading-relaxed font-medium">Early warning alert displayed across messaging pages. Prompts team to contact Admin before exhausting quota.</p>
+                      </div>
+                      <div className="rounded-xl border border-orange-200 bg-orange-50/70 p-3.5">
+                        <span className="font-extrabold text-orange-950 block mb-1">950 Messages (95%)</span>
+                        <p className="text-orange-900 leading-relaxed font-medium">Urgent critical alert banner displayed. Highlights &quot;To upgrade your limits, contact Admin&quot;.</p>
+                      </div>
+                      <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-3.5">
+                        <span className="font-extrabold text-rose-950 block mb-1">1,000 Messages (100%)</span>
+                        <p className="text-rose-900 leading-relaxed font-medium">Strict hard cap. Not a single additional message can be sent until Admin upgrades limit from their end.</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </Panel>
             ) : null}

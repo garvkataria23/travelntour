@@ -1,11 +1,12 @@
-﻿"use client";
+"use client";
 
 import { AppShell } from "@/components/dashboard/app-shell";
 import { Pagination, StatCard } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { api, formatDate } from "@/lib/api";
-import { BarChart3, Clock3, Edit, Eye, FileText, MessageCircle, MoreHorizontal, Plus, Search, Send, Trash2, X } from "lucide-react";
+import { BarChart3, Clock3, Edit, Eye, FileText, Lock, MessageCircle, MoreHorizontal, Plus, Search, Send, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { checkCanSendWhatsApp, recordMessageSent, evaluateQuotaStatus, getStoredQuota } from "@/lib/whatsapp-quota";
 
 interface TemplateMeta {
   total: number;
@@ -449,10 +450,23 @@ function PreviewModal({ template, onClose, onEdit, onSendTest }: { template: Tem
 
 function TestModal({ template, customers, onClose, onDone }: { template: TemplateItem; customers: CustomerItem[]; onClose: () => void; onDone: (msg: string) => void }) {
   const [customerId, setCustomerId] = useState(customers[0]?.id ?? "");
+  const [quotaStatus, setQuotaStatus] = useState(() => evaluateQuotaStatus(getStoredQuota()));
 
   useEffect(() => {
     if (!customerId && customers.length) setCustomerId(customers[0].id);
   }, [customers, customerId]);
+
+  useEffect(() => {
+    const handleQuotaSync = () => {
+      setQuotaStatus(evaluateQuotaStatus(getStoredQuota()));
+    };
+    window.addEventListener("fc:whatsapp-quota-updated", handleQuotaSync);
+    window.addEventListener("storage", handleQuotaSync);
+    return () => {
+      window.removeEventListener("fc:whatsapp-quota-updated", handleQuotaSync);
+      window.removeEventListener("storage", handleQuotaSync);
+    };
+  }, []);
 
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -462,10 +476,20 @@ function TestModal({ template, customers, onClose, onDone }: { template: Templat
 
   async function send() {
     setError("");
+    const quotaCheck = checkCanSendWhatsApp(1);
+    if (!quotaCheck.allowed) {
+      setError(quotaCheck.error || "WhatsApp message limit reached (1,000 messages). Not a single additional message can be sent. To upgrade your limits, contact Admin.");
+      return;
+    }
     if (!customerId) { setError("Koi customer select karein"); return; }
     setSending(true);
     try {
       await api("/messages", { method: "POST", body: { customerId, text: rendered } });
+      try {
+        recordMessageSent(1);
+      } catch (err) {
+        console.warn("Quota record error:", err);
+      }
       onDone(`Test message sent to ${customer?.name}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to send test message");
@@ -478,12 +502,27 @@ function TestModal({ template, customers, onClose, onDone }: { template: Templat
       <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between"><h3 className="text-lg font-extrabold">Send Test Message</h3><button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef]"><X className="h-4 w-4" /></button></div>
         <p className="mb-3 text-sm text-[#596782]">Template "{template.name}" ko kisi customer ko bhejein — message directly customer ke WhatsApp par jayega.</p>
+
+        {quotaStatus.isBlocked && (
+          <div className="mb-3 rounded-xl border border-rose-300 bg-rose-50 p-3.5 text-xs text-rose-950 font-medium">
+            <div className="flex items-center gap-1.5 font-extrabold text-rose-800">
+              <Lock className="h-4 w-4 text-rose-600" /> WhatsApp Messaging Strictly Locked
+            </div>
+            <p className="mt-1">
+              You have reached your 1,000 message cap ({quotaStatus.used} / {quotaStatus.limit}). Not a single additional test or automated message will be sent.
+            </p>
+            <p className="mt-1 font-bold text-rose-700">
+              To upgrade your limits, contact Admin.
+            </p>
+          </div>
+        )}
+
         {error ? <p className="mb-3 rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</p> : null}
-        <label className="block"><span className="text-sm font-semibold text-[#405174]">Customer</span><select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-[#d6e1ef] bg-white px-3 outline-none">{customers.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}</select></label>
+        <label className="block"><span className="text-sm font-semibold text-[#405174]">Customer</span><select value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={quotaStatus.isBlocked} className="mt-1 h-11 w-full rounded-lg border border-[#d6e1ef] bg-white px-3 outline-none disabled:cursor-not-allowed"><option value="">Select customer...</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}</select></label>
         <div className="mt-3 rounded-xl bg-[#f8fbff] p-4"><div className="mb-2 text-xs font-bold uppercase tracking-wide text-[#596782]">Will be sent</div><div className="rounded-xl bg-[#d9ffd0] p-5 shadow-sm"><p className="whitespace-pre-wrap break-words">{rendered}</p><div className="mt-2 text-right text-sm text-[#596782]">10:32 AM ✓✓</div></div></div>
         <div className="mt-5 flex justify-end gap-3">
           <button onClick={onClose} className="h-11 rounded-lg border border-[#d6e1ef] px-5 font-semibold">Cancel</button>
-          <button onClick={send} disabled={sending} className="flex h-11 items-center gap-2 rounded-lg bg-[#1688f9] px-6 font-bold text-white disabled:opacity-60"><Send className="h-4 w-4" />{sending ? "Sending..." : "Send"}</button>
+          <button onClick={send} disabled={sending || quotaStatus.isBlocked} className="flex h-11 items-center gap-2 rounded-lg bg-[#1688f9] px-6 font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed">{sending ? "Sending..." : <>Send <Send className="h-4 w-4" /></>}</button>
         </div>
       </div>
     </div>
