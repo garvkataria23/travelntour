@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { AlertTriangle, Banknote, BarChart3, Bell, CalendarCheck, Check, ChevronDown, Clock3, Command, FileText, Home, LogOut, Menu, MessageCircle, PanelLeftClose, PanelLeftOpen, Plane, Plus, Receipt, RefreshCw, Search, Settings, Users, Wallet, Workflow, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Banknote, BarChart3, Bell, CalendarCheck, Check, ChevronDown, Clock3, Command, FileText, Home, LogOut, Menu, MessageCircle, PanelLeftClose, PanelLeftOpen, Plane, Plus, Receipt, RefreshCw, Search, Settings, ShieldAlert, Users, Wallet, Workflow, X, type LucideIcon } from "lucide-react";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { api, clearSession, formatDate, getAccessToken, getStoredUser, type ApiUser } from "@/lib/api";
 import { useApi, useOffline } from "@/lib/hooks";
 import { CurrencyProvider, useCurrency } from "@/lib/currency";
 import { logOut as firebaseLogOut } from "@/lib/firebase";
 import { CollaboratorPresence } from "@/components/collaborator-presence";
+import { isAccountBlocked } from "@/lib/admin-accounts";
 
 export interface NavGroup {
   title: string;
@@ -64,6 +65,27 @@ export function AppShell({ children }: { children: ReactNode }) {
   const me = useApi<{ business?: { id?: string; name?: string | null; currency?: string | null } }>("/settings");
   const offline = useOffline();
 
+  const [blockState, setBlockState] = useState<{ isBlocked: boolean; isSuspended: boolean; reason?: string }>(() => {
+    if (typeof window === "undefined") return { isBlocked: false, isSuspended: false };
+    const currentBiz = window.localStorage.getItem("fc_business_id") || "biz_demo";
+    return isAccountBlocked(currentBiz);
+  });
+
+  useEffect(() => {
+    const handleStatusSync = () => {
+      const currentBiz = window.localStorage.getItem("fc_business_id") || user?.businessId || "biz_demo";
+      setBlockState(isAccountBlocked(currentBiz));
+    };
+
+    handleStatusSync();
+    window.addEventListener("fc:account-status-changed", handleStatusSync);
+    window.addEventListener("fc:admin-accounts-updated", handleStatusSync);
+    return () => {
+      window.removeEventListener("fc:account-status-changed", handleStatusSync);
+      window.removeEventListener("fc:admin-accounts-updated", handleStatusSync);
+    };
+  }, [user]);
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       const savedPin = window.localStorage.getItem("fc_sidebar_pinned");
@@ -110,6 +132,70 @@ export function AppShell({ children }: { children: ReactNode }) {
   const businessName = me.data?.business?.name || user.name;
   const paddingLeft = pinned ? "lg:pl-[240px]" : "lg:pl-[72px]";
 
+  // Enforcement: If account has been blocked or suspended by Master Admin
+  if (user.role !== "SUPER_ADMIN" && (blockState.isBlocked || blockState.isSuspended)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-900 p-4">
+        <div className="w-full max-w-lg rounded-3xl border-t-8 border-rose-500 bg-white p-8 text-center shadow-2xl">
+          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-2xl bg-rose-100 text-rose-600 shadow-inner">
+            <AlertTriangle className="h-10 w-10 stroke-[2.5]" />
+          </div>
+
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-100 px-3.5 py-1 text-xs font-black tracking-wide text-rose-800 uppercase">
+            Account Suspended by Master Admin
+          </span>
+
+          <h2 className="mt-3 text-2xl font-black tracking-tight text-slate-900">
+            Agency Access Restricted
+          </h2>
+
+          <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50/60 p-4 text-left">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase tracking-wider">
+              <span>Tenant / Business</span>
+              <span className="rounded bg-rose-200/80 px-2 py-0.5 text-rose-900">LOCKED</span>
+            </div>
+            <p className="mt-1 text-base font-extrabold text-slate-900">{businessName}</p>
+
+            <div className="mt-3 pt-3 border-t border-rose-200/60">
+              <span className="text-xs font-bold text-rose-800 uppercase tracking-wide">Reason for Suspension:</span>
+              <p className="mt-1 text-sm font-semibold text-rose-950 leading-relaxed">
+                {blockState.reason || "Administrative policy hold or billing violation."}
+              </p>
+            </div>
+          </div>
+
+          <p className="mt-5 text-sm text-slate-600 leading-relaxed">
+            All booking operations, WhatsApp messaging, and invoice generation for this agency have been frozen by the Master Administrator.
+          </p>
+
+          <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50/70 p-4 text-left text-xs font-medium text-slate-800 space-y-1.5">
+            <div className="font-bold text-blue-900 flex items-center gap-2">
+              <span>Master Administrator:</span>
+              <span className="rounded bg-blue-200/70 px-2 py-0.5 text-blue-900 font-extrabold">Garv Kataria</span>
+            </div>
+            <p><b>Email:</b> admin@blueauratravel.com</p>
+            <p><b>Direct Line:</b> +971 50 123 4567</p>
+            <p className="text-[11px] text-blue-700 pt-1">
+              Please contact the Master Admin to resolve issues and reactivate your portal access.
+            </p>
+          </div>
+
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={() => {
+                clearSession();
+                router.replace("/");
+              }}
+              className="w-full rounded-xl bg-slate-900 py-3 text-sm font-bold text-white shadow-md hover:bg-slate-800 transition active:scale-[0.99]"
+            >
+              Sign Out to Login Screen
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <CurrencyProvider businessCurrency={me.data?.business?.currency}>
       <div className="flyconnect-app min-h-screen overflow-x-clip bg-[#f4f9ff] text-[#08142e]">
@@ -124,6 +210,25 @@ export function AppShell({ children }: { children: ReactNode }) {
           onHoverChange={setRailHover}
         />
         <div className={`min-h-screen overflow-x-clip transition-[padding] duration-200 ${paddingLeft}`}>
+          {/* Super Admin Top Control Banner */}
+          {user.role === "SUPER_ADMIN" ? (
+            <div className="relative z-30 flex flex-wrap items-center justify-between gap-2 border-b border-amber-400 bg-gradient-to-r from-amber-600 via-amber-700 to-amber-800 px-4 py-2 text-xs font-bold text-white shadow-md">
+              <div className="flex items-center gap-2">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20 text-[11px]">★</span>
+                <span>MASTER ADMIN MODE ACTIVE — Full Platform Controls & Quota Overrides Enabled</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/admin"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1 font-extrabold text-amber-900 shadow-sm transition hover:bg-amber-100"
+                >
+                  <ShieldAlert className="h-3.5 w-3.5 text-amber-700" />
+                  Open Master Admin Panel →
+                </Link>
+              </div>
+            </div>
+          ) : null}
+
           <Topbar onMenu={() => setOpen(true)} user={user} businessName={businessName} onLogout={() => setLogoutOpen(true)} />
           {offline ? (
             <div className="flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm font-semibold text-amber-800" role="status">
@@ -609,6 +714,16 @@ function AccountMenu({ user, businessName, onLogout }: { user: ApiUser; business
             <div className="text-sm font-bold">{user.name}</div>
             <div className="mt-0.5 text-xs text-[#596782]">{user.email}<span className="ml-2 rounded bg-[#e8edf5] px-1.5 py-0.5 text-[#405174] capitalize">{user.role?.toLowerCase()}</span></div>
           </div>
+          {user.role === "SUPER_ADMIN" ? (
+            <Link
+              href="/admin"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 border-b border-amber-200 bg-amber-50/80 px-4 py-2.5 text-sm font-bold text-amber-900 transition hover:bg-amber-100"
+            >
+              <ShieldAlert className="h-4 w-4 text-amber-600" />
+              Master Admin Panel
+            </Link>
+          ) : null}
           <Link href="/settings" onClick={() => setOpen(false)} className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition hover:bg-slate-50"><Settings className="h-4 w-4" />Settings</Link>
           <button onClick={onLogout} className="flex w-full items-center gap-2 px-4 py-2.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50"><LogOut className="h-4 w-4" />Log out</button>
         </div>

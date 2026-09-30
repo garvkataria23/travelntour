@@ -3,9 +3,10 @@
 import { ArrowRight, Check, Eye, Globe2, LockKeyhole, Mail, Plane, User as UserIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { api, hasActiveSession, setSession, type ApiSession } from "@/lib/api";
+import { api, hasActiveSession, setSession, getStoredUser, type ApiSession } from "@/lib/api";
 import { signInWithEmail, signUpWithEmail, resetPassword, onAuthChange } from "@/lib/firebase";
 import { getOrCreateUserProfile } from "@/lib/firestore";
+import { MASTER_ADMIN_ID, MASTER_ADMIN_PASS, isMasterAdminCredentials } from "@/lib/admin-accounts";
 
 const EASY_ID = "blue";
 const EASY_PASSWORD = "aura";
@@ -35,17 +36,19 @@ export function LoginPage() {
 
   function validate() {
     const errors: { name?: string; userId?: string; password?: string } = {};
+    const isMaster = userId.trim().toUpperCase() === MASTER_ADMIN_ID;
+
     if (mode === "register" && !name.trim()) {
       errors.name = "Full name or agency name is required.";
     }
     if (!userId.trim()) {
-      errors.userId = "Email is required.";
-    } else if (userId.trim() !== EASY_ID && !EMAIL_RE.test(userId.trim())) {
-      errors.userId = "Enter a valid email address.";
+      errors.userId = "Email or Master ID is required.";
+    } else if (userId.trim() !== EASY_ID && !isMaster && !EMAIL_RE.test(userId.trim())) {
+      errors.userId = "Enter a valid email address or Master Admin ID.";
     }
     if (!password) {
       errors.password = "Password is required.";
-    } else if (password.length < 6 && userId.trim() !== EASY_ID) {
+    } else if (password.length < 6 && userId.trim() !== EASY_ID && !isMaster) {
       errors.password = "Password must be at least 6 characters.";
     }
     return errors;
@@ -61,9 +64,24 @@ export function LoginPage() {
     setShowPassword(false);
   }
 
+  function fillMasterAdmin() {
+    setMode("login");
+    setUserId(MASTER_ADMIN_ID);
+    setPassword(MASTER_ADMIN_PASS);
+    setFieldErrors({});
+    setError("");
+    setMessage("Master Admin credentials loaded (TRAVELNTOUR). Click Login to enter Admin Control Center.");
+    setShowPassword(true);
+  }
+
   useEffect(() => {
     if (hasActiveSession()) {
-      router.replace("/dashboard");
+      const stored = getStoredUser();
+      if (stored?.role === "SUPER_ADMIN") {
+        router.replace("/admin");
+      } else {
+        router.replace("/dashboard");
+      }
     } else {
       setReady(true);
     }
@@ -80,6 +98,31 @@ export function LoginPage() {
     setLoading(true);
 
     try {
+      // 0. Master Admin Credentials Check (Garv Kataria - TRAVELNTOUR / GARV2331##)
+      if (isMasterAdminCredentials(userId, password)) {
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("fc_business_id", "biz_blueaura");
+          window.localStorage.setItem("fc_is_master_admin", "1");
+        }
+        setSession(
+          {
+            accessToken: "token_master_admin_garv",
+            refreshToken: "refresh_master_admin_garv",
+            user: {
+              id: "usr_master_admin_garv",
+              name: "Garv Kataria (Master Admin)",
+              email: "admin@blueauratravel.com",
+              role: "SUPER_ADMIN",
+              businessId: "biz_blueaura",
+            },
+          },
+          remember
+        );
+        setMessage("Master Admin Access Granted. Launching Admin Control Center...");
+        setTimeout(() => router.push("/admin"), 350);
+        return;
+      }
+
       // 1. Check if user is using legacy/demo bypass
       if (userId.trim() === EASY_ID && password === EASY_PASSWORD) {
         try {
@@ -404,17 +447,33 @@ export function LoginPage() {
             {error ? <p className="mt-4 rounded-lg bg-rose-50 px-4 py-3 text-center text-sm font-medium text-rose-700">{error}</p> : null}
             {message ? <p className="mt-4 rounded-lg bg-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-700">{message}</p> : null}
 
-            {/* Quick Demo Access */}
-            <button
-              type="button"
-              onClick={fillDemo}
-              className="mt-5 flex w-full items-center justify-between gap-3 rounded-lg border border-dashed border-[#8fc4f5] bg-blue-50/70 px-4 py-2.5 text-left transition hover:bg-blue-100/70"
-            >
-              <span className="text-xs font-medium text-blue-700">
-                Quick demo access: <b>{EASY_ID}</b> / <b>{EASY_PASSWORD}</b>
-              </span>
-              <span className="shrink-0 rounded-md bg-[#1688f9] px-2.5 py-1 text-xs font-bold text-white">Fill Demo</span>
-            </button>
+            {/* Quick Demo & Master Admin Access */}
+            <div className="mt-5 space-y-2.5">
+              <button
+                type="button"
+                onClick={fillDemo}
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-dashed border-[#8fc4f5] bg-blue-50/70 px-4 py-2.5 text-left transition hover:bg-blue-100/70"
+              >
+                <span className="text-xs font-medium text-blue-700">
+                  Quick demo access: <b>{EASY_ID}</b> / <b>{EASY_PASSWORD}</b>
+                </span>
+                <span className="shrink-0 rounded-md bg-[#1688f9] px-2.5 py-1 text-xs font-bold text-white">Fill Demo</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={fillMasterAdmin}
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50/80 px-4 py-2.5 text-left transition hover:bg-amber-100/80"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-black text-white">★</span>
+                  <span className="text-xs font-semibold text-amber-900">
+                    Master Admin Access: <b>TRAVELNTOUR</b> / <b>••••••••</b>
+                  </span>
+                </div>
+                <span className="shrink-0 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-700">Master Admin</span>
+              </button>
+            </div>
           </div>
         </section>
       </section>

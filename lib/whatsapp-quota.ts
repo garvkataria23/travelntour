@@ -16,6 +16,8 @@ export interface WhatsAppQuotaConfig {
   adminEmail: string;
   adminPhone: string;
   adminName: string;
+  isGloballyPaused?: boolean;
+  globalPauseReason?: string;
   lastUpgradedAt?: string;
   upgradedBy?: string;
   history: Array<{
@@ -35,8 +37,10 @@ export interface QuotaStatus {
   isWarning: boolean; // >= 800 && < 950
   isCritical: boolean; // >= 950 && < 1000
   isBlocked: boolean; // >= 1000
+  isGloballyPaused?: boolean;
+  globalPauseReason?: string;
   canSend: boolean;
-  status: "NORMAL" | "WARNING" | "CRITICAL" | "BLOCKED";
+  status: "NORMAL" | "WARNING" | "CRITICAL" | "BLOCKED" | "PAUSED";
   message: string;
 }
 
@@ -114,7 +118,12 @@ export function evaluateQuotaStatus(quota: WhatsAppQuotaConfig): QuotaStatus {
   let status: QuotaStatus["status"] = "NORMAL";
   let message = `You have used ${used.toLocaleString()} of ${limit.toLocaleString()} messages (${remaining.toLocaleString()} remaining).`;
 
-  if (isBlocked) {
+  if (quota.isGloballyPaused) {
+    status = "PAUSED";
+    message = quota.globalPauseReason
+      ? `WhatsApp messaging paused by Master Admin: ${quota.globalPauseReason}`
+      : "WhatsApp messaging has been temporarily paused by Master Admin. Please contact Admin.";
+  } else if (isBlocked) {
     status = "BLOCKED";
     message = `WhatsApp message limit reached (${used.toLocaleString()} / ${limit.toLocaleString()}). Not a single message can be sent until upgraded. To upgrade your limits, contact Admin.`;
   } else if (isCritical) {
@@ -133,7 +142,9 @@ export function evaluateQuotaStatus(quota: WhatsAppQuotaConfig): QuotaStatus {
     isWarning,
     isCritical,
     isBlocked,
-    canSend: !isBlocked,
+    isGloballyPaused: Boolean(quota.isGloballyPaused),
+    globalPauseReason: quota.globalPauseReason,
+    canSend: !isBlocked && !quota.isGloballyPaused,
     status,
     message,
   };
@@ -150,6 +161,14 @@ export function checkCanSendWhatsApp(additionalCount = 1): {
 } {
   const quota = getStoredQuota();
   const currentStatus = evaluateQuotaStatus(quota);
+
+  if (currentStatus.isGloballyPaused) {
+    return {
+      allowed: false,
+      error: currentStatus.message,
+      status: currentStatus,
+    };
+  }
 
   if (currentStatus.isBlocked || quota.used + additionalCount > quota.limit) {
     return {
@@ -262,6 +281,108 @@ export function setSimulationUsage(usedCount: number): QuotaStatus {
   const updated: WhatsAppQuotaConfig = {
     ...quota,
     used: Math.max(0, Math.round(usedCount)),
+  };
+
+  saveQuota(updated);
+  return evaluateQuotaStatus(updated);
+}
+
+/**
+ * Master Admin Action: Set precise custom limits and warning thresholds.
+ */
+export function setWhatsAppCustomLimits(
+  limit: number,
+  warningThreshold?: number,
+  criticalThreshold?: number,
+  adminName = "Garv Kataria (Master Admin)",
+  notes = "Custom WhatsApp limit set from Master Admin Control Center"
+): QuotaStatus {
+  const quota = getStoredQuota();
+  const safeLimit = Math.max(10, Math.round(limit));
+  const safeWarning = warningThreshold && warningThreshold > 0
+    ? Math.min(safeLimit - 1, Math.round(warningThreshold))
+    : Math.round(safeLimit * 0.8);
+  const safeCritical = criticalThreshold && criticalThreshold > safeWarning
+    ? Math.min(safeLimit - 1, Math.round(criticalThreshold))
+    : Math.round(safeLimit * 0.95);
+
+  const updated: WhatsAppQuotaConfig = {
+    ...quota,
+    limit: safeLimit,
+    warningThreshold: safeWarning,
+    criticalThreshold: safeCritical,
+    lastUpgradedAt: new Date().toISOString(),
+    upgradedBy: adminName,
+    history: [
+      {
+        date: new Date().toISOString(),
+        oldLimit: quota.limit,
+        newLimit: safeLimit,
+        upgradedBy: adminName,
+        notes,
+      },
+      ...quota.history.slice(0, 19),
+    ],
+  };
+
+  saveQuota(updated);
+  return evaluateQuotaStatus(updated);
+}
+
+/**
+ * Master Admin Action: Adjust current usage counter directly.
+ */
+export function setWhatsAppUsageCount(
+  usedCount: number,
+  adminName = "Garv Kataria (Master Admin)"
+): QuotaStatus {
+  const quota = getStoredQuota();
+  const safeUsed = Math.max(0, Math.round(usedCount));
+
+  const updated: WhatsAppQuotaConfig = {
+    ...quota,
+    used: safeUsed,
+    history: [
+      {
+        date: new Date().toISOString(),
+        oldLimit: quota.limit,
+        newLimit: quota.limit,
+        upgradedBy: adminName,
+        notes: `Usage counter manually set to ${safeUsed} by Admin`,
+      },
+      ...quota.history.slice(0, 19),
+    ],
+  };
+
+  saveQuota(updated);
+  return evaluateQuotaStatus(updated);
+}
+
+/**
+ * Master Admin Emergency Kill Switch: Toggle platform-wide WhatsApp messaging pause.
+ */
+export function toggleWhatsAppGlobalPause(
+  paused: boolean,
+  reason?: string,
+  adminName = "Garv Kataria (Master Admin)"
+): QuotaStatus {
+  const quota = getStoredQuota();
+  const updated: WhatsAppQuotaConfig = {
+    ...quota,
+    isGloballyPaused: paused,
+    globalPauseReason: paused ? (reason || "Emergency maintenance pause by Master Admin") : undefined,
+    history: [
+      {
+        date: new Date().toISOString(),
+        oldLimit: quota.limit,
+        newLimit: quota.limit,
+        upgradedBy: adminName,
+        notes: paused
+          ? `Messaging paused: ${reason || "Master Admin Emergency Kill Switch"}`
+          : "Messaging resumed by Master Admin",
+      },
+      ...quota.history.slice(0, 19),
+    ],
   };
 
   saveQuota(updated);
