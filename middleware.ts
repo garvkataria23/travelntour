@@ -22,6 +22,16 @@ export function middleware(request: NextRequest) {
     }
   })();
 
+  const fallbackApiOrigin = (() => {
+    try {
+      return new URL(
+        process.env.NEXT_PUBLIC_FALLBACK_API_URL || "https://flyconnect-backend-fallback.onrender.com/api"
+      ).origin;
+    } catch {
+      return "https://flyconnect-backend-fallback.onrender.com";
+    }
+  })();
+
   const csp = [
     "default-src 'self'",
     // Next.js injects inline bootstrap scripts; the nonce is what makes them acceptable.
@@ -30,8 +40,8 @@ export function middleware(request: NextRequest) {
     `style-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
     "img-src 'self' data: blob: https://lh3.googleusercontent.com",
     "font-src 'self' data:",
-    // Every API call, including backend API, Firebase Auth, and Firestore
-    `connect-src 'self' ${apiOrigin} https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com`,
+    // Every API call, including primary backend, fallback backend, Firebase Auth, and Firestore
+    `connect-src 'self' ${apiOrigin} ${fallbackApiOrigin} https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com`,
     "frame-src 'self' https://traveltourism-32d7d.firebaseapp.com https://accounts.google.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",

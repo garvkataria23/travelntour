@@ -2,7 +2,20 @@
 
 import { BASE_CURRENCY, convertAmount, formatMoney, getDisplayCurrency } from "@/lib/currency-core";
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
+export const PRIMARY_API_BASE =
+  process.env.NEXT_PUBLIC_API_URL || "https://129.159.16.165.sslip.io/api";
+export const FALLBACK_API_BASE =
+  process.env.NEXT_PUBLIC_FALLBACK_API_URL || "https://flyconnect-backend-fallback.onrender.com/api";
+
+export let API_BASE = PRIMARY_API_BASE;
+
+export function getActiveApiBase(): string {
+  return API_BASE;
+}
+
+export function setActiveApiBase(url: string): void {
+  API_BASE = url;
+}
 
 export interface ApiUser {
   id: string;
@@ -171,6 +184,84 @@ export function invalidateCache(keyPrefix?: string): void {
   invalidate(keyPrefix);
 }
 
+let lastFailoverAt = 0;
+const PROBE_INTERVAL_MS = 5 * 60 * 1000;
+
+function shouldFailover(err: unknown, res?: Response, signal?: AbortSignal | null): boolean {
+  if (signal?.aborted) return false;
+  if (err) {
+    if (err instanceof Error && err.name === "AbortError") return false;
+    return true;
+  }
+  if (res && (res.status === 502 || res.status === 503 || res.status === 504)) {
+    return true;
+  }
+  return false;
+}
+
+async function fetchWithEndpoint(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return fetch(`${cleanBase}${cleanPath}`, init);
+}
+
+async function doFetchWithFailover(path: string, init: RequestInit): Promise<Response> {
+  if (!FALLBACK_API_BASE || FALLBACK_API_BASE === PRIMARY_API_BASE) {
+    return fetchWithEndpoint(API_BASE, path, init);
+  }
+
+  // If currently using fallback, periodically probe if primary came back
+  if (API_BASE === FALLBACK_API_BASE && Date.now() - lastFailoverAt > PROBE_INTERVAL_MS) {
+    try {
+      const probeController = new AbortController();
+      const probeTimer = setTimeout(() => probeController.abort(), 3000);
+      const probe = await fetchWithEndpoint(PRIMARY_API_BASE, "/health", {
+        method: "GET",
+        signal: probeController.signal,
+      });
+      clearTimeout(probeTimer);
+      if (probe.ok) {
+        console.info(`[FlyConnect API] Primary server (${PRIMARY_API_BASE}) restored! Switching back from standby.`);
+        API_BASE = PRIMARY_API_BASE;
+      } else {
+        lastFailoverAt = Date.now();
+      }
+    } catch {
+      lastFailoverAt = Date.now();
+    }
+  }
+
+  if (API_BASE === PRIMARY_API_BASE) {
+    try {
+      const res = await fetchWithEndpoint(PRIMARY_API_BASE, path, init);
+      if (shouldFailover(null, res, init.signal)) {
+        console.warn(
+          `[FlyConnect API] Primary server returned ${res.status}. Seamlessly failing over to Render standby (${FALLBACK_API_BASE})...`
+        );
+        const fallbackRes = await fetchWithEndpoint(FALLBACK_API_BASE, path, init);
+        API_BASE = FALLBACK_API_BASE;
+        lastFailoverAt = Date.now();
+        return fallbackRes;
+      }
+      return res;
+    } catch (err) {
+      if (shouldFailover(err, undefined, init.signal)) {
+        console.warn(
+          `[FlyConnect API] Primary server unreachable. Seamlessly failing over to Render standby (${FALLBACK_API_BASE})...`,
+          err
+        );
+        const fallbackRes = await fetchWithEndpoint(FALLBACK_API_BASE, path, init);
+        API_BASE = FALLBACK_API_BASE;
+        lastFailoverAt = Date.now();
+        return fallbackRes;
+      }
+      throw err;
+    }
+  }
+
+  return fetchWithEndpoint(FALLBACK_API_BASE, path, init);
+}
+
 let refreshPromise: Promise<boolean> | null = null;
 
 async function tryRefresh(): Promise<boolean> {
@@ -202,7 +293,7 @@ async function tryRefresh(): Promise<boolean> {
 
   // 2. Try backend API refresh, but NEVER aggressively wipe session on error
   if (!refreshPromise) {
-    refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
+    refreshPromise = doFetchWithFailover("/auth/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refreshToken }),
@@ -250,7 +341,7 @@ export async function api<T>(path: string, options: ApiRequestOptions = {}): Pro
     };
   };
 
-  const doFetch = (token?: string | null) => fetch(`${API_BASE}${path}`, buildRequest(token));
+  const doFetch = (token?: string | null) => doFetchWithFailover(path, buildRequest(token));
   const parse = async (res: Response) => {
     const text = await res.text();
     let json: { success: boolean; message?: string; code?: string; data?: unknown; errors?: unknown };
