@@ -24,7 +24,10 @@ export interface AdminAccount {
   whatsappUsed: number;
   createdAt: string;
   lastActiveAt: string;
-  totalBookings: number;
+  branchId?: string;
+  branchName?: string;
+  currency?: string;
+  totalBookings?: number;
   notes?: string;
 }
 
@@ -239,6 +242,30 @@ export function updateAccountWhatsAppLimit(
     }
   }
 
+  return updated;
+}
+
+/**
+ * Master Admin: Edit and customize any account's details (Name, Owner, Phone, Email, Branch, Plan, Notes)
+ */
+export function updateAdminAccount(
+  accountId: string,
+  updates: Partial<AdminAccount>
+): AdminAccount {
+  const accounts = getAdminAccounts();
+  const index = accounts.findIndex((a) => a.id === accountId);
+  if (index === -1) {
+    throw new Error(`Account "${accountId}" not found.`);
+  }
+
+  const updated: AdminAccount = {
+    ...accounts[index],
+    ...updates,
+    id: accounts[index].id, // preserve ID
+  };
+
+  accounts[index] = updated;
+  saveAdminAccounts(accounts);
   return updated;
 }
 

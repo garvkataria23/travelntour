@@ -146,10 +146,20 @@ export default function AddBookingPage() {
   const [bookingFor, setBookingFor] = useState<"CORPORATE" | "INDIVIDUAL">("CORPORATE");
 
   // Corporate Roster
-  const [companies, setCompanies] = useState<Company[]>(INITIAL_COMPANIES);
+  const [companies, setCompanies] = useState<Company[]>(() => getStoredCompanies());
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>("comp-1");
   const [companySearch, setCompanySearch] = useState("");
   const [companyOpen, setCompanyOpen] = useState(false);
+
+  useEffect(() => {
+    const handleCompaniesSync = () => {
+      const stored = getStoredCompanies();
+      setCompanies(stored);
+    };
+    handleCompaniesSync();
+    window.addEventListener("fc:companies-updated", handleCompaniesSync);
+    return () => window.removeEventListener("fc:companies-updated", handleCompaniesSync);
+  }, []);
 
   // Employees Roster
   const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);

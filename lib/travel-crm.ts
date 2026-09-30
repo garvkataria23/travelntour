@@ -38,6 +38,23 @@ export interface Company {
   activeEmployees: number;
   monthlySpend: number;
   lastBookingDate: string;
+  branchId?: string;
+  branchName?: string;
+  status?: "ACTIVE" | "INACTIVE";
+}
+
+export interface Branch {
+  id: string;
+  name: string;
+  code: string;
+  city: string;
+  country: string;
+  address: string;
+  managerName: string;
+  managerEmail: string;
+  phone: string;
+  status: "ACTIVE" | "INACTIVE";
+  notes?: string;
 }
 
 export interface EmployeeTravelHistory {
@@ -139,6 +156,48 @@ export interface TravelCrmRecord {
   createdAt: string;
 }
 
+export const INITIAL_BRANCHES: Branch[] = [
+  {
+    id: "branch-dxb",
+    name: "Dubai Flagship Headquarters",
+    code: "DXB-HQ",
+    city: "Dubai",
+    country: "United Arab Emirates",
+    address: "Level 14, Rolex Tower, Sheikh Zayed Road, Trade Centre 1, Dubai",
+    managerName: "Garv Kataria (Owner)",
+    managerEmail: "admin@blueauratravel.com",
+    phone: "+971 50 123 4567",
+    status: "ACTIVE",
+    notes: "Main operating headquarters managing GCC corporate accounts, flight ticketing, and luxury VIP itineraries.",
+  },
+  {
+    id: "branch-bom",
+    name: "Mumbai Corporate Operations Hub",
+    code: "BOM-CORP",
+    city: "Mumbai",
+    country: "India",
+    address: "One BKC, 7th Floor, Bandra Kurla Complex, Mumbai, Maharashtra 400051",
+    managerName: "Rahul Sharma (Branch VP)",
+    managerEmail: "mumbai.ops@blueauratravel.com",
+    phone: "+91 98111 22334",
+    status: "ACTIVE",
+    notes: "Handles corporate accounts, Indian MNC travel desks, flights, group conferences, and international visas.",
+  },
+  {
+    id: "branch-del",
+    name: "Delhi NCR Northern Operations",
+    code: "DEL-NORTH",
+    city: "New Delhi",
+    country: "India",
+    address: "Statesman House, Barakhamba Road, Connaught Place, New Delhi 110001",
+    managerName: "Priya Verma (Regional Lead)",
+    managerEmail: "delhi.desk@blueauratravel.com",
+    phone: "+91 98222 33445",
+    status: "ACTIVE",
+    notes: "North India corporate delegations, Embassy visa submissions, and MICE logistics.",
+  },
+];
+
 export const INITIAL_COMPANIES: Company[] = [
   {
     id: "comp-1",
@@ -157,6 +216,9 @@ export const INITIAL_COMPANIES: Company[] = [
     activeEmployees: 35,
     monthlySpend: 64200,
     lastBookingDate: "2026-09-24",
+    branchId: "branch-dxb",
+    branchName: "Dubai Flagship Headquarters",
+    status: "ACTIVE",
   },
   {
     id: "comp-2",
@@ -175,6 +237,9 @@ export const INITIAL_COMPANIES: Company[] = [
     activeEmployees: 52,
     monthlySpend: 89500,
     lastBookingDate: "2026-09-28",
+    branchId: "branch-dxb",
+    branchName: "Dubai Flagship Headquarters",
+    status: "ACTIVE",
   },
   {
     id: "comp-3",
@@ -193,6 +258,9 @@ export const INITIAL_COMPANIES: Company[] = [
     activeEmployees: 28,
     monthlySpend: 47600,
     lastBookingDate: "2026-09-29",
+    branchId: "branch-dxb",
+    branchName: "Dubai Flagship Headquarters",
+    status: "ACTIVE",
   },
   {
     id: "comp-4",
@@ -211,6 +279,9 @@ export const INITIAL_COMPANIES: Company[] = [
     activeEmployees: 64,
     monthlySpend: 118400,
     lastBookingDate: "2026-09-27",
+    branchId: "branch-dxb",
+    branchName: "Dubai Flagship Headquarters",
+    status: "ACTIVE",
   },
   {
     id: "comp-5",
@@ -229,6 +300,9 @@ export const INITIAL_COMPANIES: Company[] = [
     activeEmployees: 41,
     monthlySpend: 79200,
     lastBookingDate: "2026-09-26",
+    branchId: "branch-dxb",
+    branchName: "Dubai Flagship Headquarters",
+    status: "ACTIVE",
   },
   {
     id: "comp-6",
@@ -247,6 +321,114 @@ export const INITIAL_COMPANIES: Company[] = [
     activeEmployees: 24,
     monthlySpend: 92300,
     lastBookingDate: "2026-09-25",
+    branchId: "branch-dxb",
+    branchName: "Dubai Flagship Headquarters",
+    status: "ACTIVE",
+  },
+  {
+    id: "comp-7",
+    name: "Tata Consultancy Services - Global Travel Desk",
+    code: "TCS-MUM",
+    industry: "IT Services & Consulting",
+    address: "TCS Banyan Park, Andheri East, Mumbai, Maharashtra 400069",
+    contactPerson: "Amitabh Sen",
+    email: "travel.admin@tcs.com",
+    phone: "+91 22 6778 9999",
+    creditLimit: 500000,
+    outstandingBalance: 42000,
+    paymentTerms: "Net 30 Days",
+    defaultCostCenter: "CC-TCS-01",
+    totalBookings: 112,
+    activeEmployees: 140,
+    monthlySpend: 185000,
+    lastBookingDate: "2026-09-30",
+    branchId: "branch-bom",
+    branchName: "Mumbai Corporate Operations Hub",
+    status: "ACTIVE",
+  },
+  {
+    id: "comp-8",
+    name: "Reliance Retail & Enterprise Ventures",
+    code: "RIL-BOM",
+    industry: "Conglomerate & Retail",
+    address: "Reliance Corporate Park, Ghansoli, Navi Mumbai 400701",
+    contactPerson: "Kavita Deshmukh",
+    email: "corporate.desk@ril.com",
+    phone: "+91 22 4477 0000",
+    creditLimit: 750000,
+    outstandingBalance: 68400,
+    paymentTerms: "Net 45 Days",
+    defaultCostCenter: "CC-RIL-09",
+    totalBookings: 89,
+    activeEmployees: 95,
+    monthlySpend: 142000,
+    lastBookingDate: "2026-09-29",
+    branchId: "branch-bom",
+    branchName: "Mumbai Corporate Operations Hub",
+    status: "ACTIVE",
+  },
+  {
+    id: "comp-9",
+    name: "Mahindra Luxury Leisure & MICE",
+    code: "MM-MUM",
+    industry: "Automotive & Hospitality",
+    address: "Mahindra Towers, Dr. G. M. Bhosale Marg, Worli, Mumbai 400018",
+    contactPerson: "Siddharth Rao",
+    email: "travel@mahindra.com",
+    phone: "+91 22 2490 1441",
+    creditLimit: 300000,
+    outstandingBalance: 21500,
+    paymentTerms: "Net 30 Days",
+    defaultCostCenter: "CC-MM-03",
+    totalBookings: 54,
+    activeEmployees: 48,
+    monthlySpend: 88000,
+    lastBookingDate: "2026-09-27",
+    branchId: "branch-bom",
+    branchName: "Mumbai Corporate Operations Hub",
+    status: "ACTIVE",
+  },
+  {
+    id: "comp-10",
+    name: "Bharti Airtel Enterprise Mobility",
+    code: "AIRTEL-DEL",
+    industry: "Telecommunications & Cloud",
+    address: "Airtel Centre, Plot 16, Udyog Vihar Phase IV, Gurugram, NCR",
+    contactPerson: "Vikas Malhotra",
+    email: "enterprise.travel@airtel.com",
+    phone: "+91 124 422 2222",
+    creditLimit: 400000,
+    outstandingBalance: 31000,
+    paymentTerms: "Net 30 Days",
+    defaultCostCenter: "CC-AIR-02",
+    totalBookings: 76,
+    activeEmployees: 82,
+    monthlySpend: 114000,
+    lastBookingDate: "2026-09-28",
+    branchId: "branch-del",
+    branchName: "Delhi NCR Northern Operations",
+    status: "ACTIVE",
+  },
+  {
+    id: "comp-11",
+    name: "Zomato & Blinkit Executive Travel",
+    code: "ZOM-NCR",
+    industry: "Quick Commerce & FoodTech",
+    address: "Ground Floor, Tower E, Pioneer Square, Sector 62, Gurugram 122098",
+    contactPerson: "Ananya Kapoor",
+    email: "traveldesk@zomato.com",
+    phone: "+91 124 678 9000",
+    creditLimit: 250000,
+    outstandingBalance: 15800,
+    paymentTerms: "Net 15 Days",
+    defaultCostCenter: "CC-ZOM-05",
+    totalBookings: 63,
+    activeEmployees: 60,
+    monthlySpend: 92000,
+    lastBookingDate: "2026-09-29",
+    branchId: "branch-del",
+    branchName: "Delhi NCR Northern Operations",
+    status: "ACTIVE",
   },
 ];
 
@@ -655,7 +837,43 @@ const STORAGE_KEYS = {
   EMPLOYEES: "bat_crm_employees_v1",
   CUSTOMERS: "bat_crm_customers_v1",
   BOOKINGS: "bat_crm_bookings_v1",
+  BRANCHES: "bat_crm_branches_v1",
 };
+
+export function getStoredBranches(): Branch[] {
+  if (typeof window === "undefined") return INITIAL_BRANCHES;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.BRANCHES);
+    if (!raw) {
+      localStorage.setItem(STORAGE_KEYS.BRANCHES, JSON.stringify(INITIAL_BRANCHES));
+      return INITIAL_BRANCHES;
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_BRANCHES;
+  } catch {
+    return INITIAL_BRANCHES;
+  }
+}
+
+export function saveBranch(branch: Branch): void {
+  if (typeof window === "undefined") return;
+  const list = getStoredBranches();
+  const index = list.findIndex((b) => b.id === branch.id);
+  if (index >= 0) {
+    list[index] = branch;
+  } else {
+    list.push(branch);
+  }
+  localStorage.setItem(STORAGE_KEYS.BRANCHES, JSON.stringify(list));
+  window.dispatchEvent(new CustomEvent("fc:branches-updated", { detail: list }));
+}
+
+export function deleteBranch(branchId: string): void {
+  if (typeof window === "undefined") return;
+  const list = getStoredBranches().filter((b) => b.id !== branchId);
+  localStorage.setItem(STORAGE_KEYS.BRANCHES, JSON.stringify(list));
+  window.dispatchEvent(new CustomEvent("fc:branches-updated", { detail: list }));
+}
 
 export function getStoredCompanies(): Company[] {
   if (typeof window === "undefined") return INITIAL_COMPANIES;
@@ -665,7 +883,8 @@ export function getStoredCompanies(): Company[] {
       localStorage.setItem(STORAGE_KEYS.COMPANIES, JSON.stringify(INITIAL_COMPANIES));
       return INITIAL_COMPANIES;
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_COMPANIES;
   } catch {
     return INITIAL_COMPANIES;
   }
@@ -681,6 +900,14 @@ export function saveCompany(company: Company): void {
     list.push(company);
   }
   localStorage.setItem(STORAGE_KEYS.COMPANIES, JSON.stringify(list));
+  window.dispatchEvent(new CustomEvent("fc:companies-updated", { detail: list }));
+}
+
+export function deleteCompany(companyId: string): void {
+  if (typeof window === "undefined") return;
+  const list = getStoredCompanies().filter((c) => c.id !== companyId);
+  localStorage.setItem(STORAGE_KEYS.COMPANIES, JSON.stringify(list));
+  window.dispatchEvent(new CustomEvent("fc:companies-updated", { detail: list }));
 }
 
 export function getStoredEmployees(companyId?: string): Employee[] {
