@@ -127,23 +127,27 @@ export default function AddBookingPage() {
   return (
     <AppShell>
       <form className="space-y-4" onSubmit={handleSubmit}>
-        <div className="flex flex-col justify-between gap-4 lg:flex-row">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <div className="mb-1 text-sm text-[#405174]"><Link href="/bookings">Bookings</Link> <span className="mx-2">›</span> <b>Add Booking</b></div>
-            <h1 className="text-[32px] font-extrabold leading-tight tracking-[-0.04em]">Add New Booking</h1>
-            <p className="mt-1 text-base text-[#596782]">Enter the booking details once and let the system handle the rest.</p>
+            <div className="mb-1 text-sm text-[#405174]"><Link href="/bookings" className="hover:text-[#1688f9] transition">Bookings</Link> <span className="mx-2 text-slate-400">›</span> <b className="text-slate-800">Add Booking</b></div>
+            <h1 className="text-[28px] sm:text-[32px] font-extrabold leading-tight tracking-[-0.04em] text-slate-900">Add New Booking</h1>
+            <p className="mt-1 text-sm sm:text-base text-[#596782]">Enter the passenger and flight details. Automated WhatsApp notifications and invoices trigger automatically.</p>
           </div>
-          <div className="relative hidden min-h-[150px] flex-1 text-right text-[#6d95d5] lg:block">
-            <p className="absolute right-24 top-7 rotate-[-8deg] font-hand text-2xl italic leading-8">One Booking. Many Journeys.<br />Automatically.</p>
-            <Plane className="absolute right-0 top-4 h-16 w-16 -rotate-[20deg] fill-[#6f8bb6] stroke-[#6f8bb6]" />
-            <div className="absolute right-16 top-[96px] h-px w-64 rotate-[-18deg] border-t-2 border-dashed border-[#9fc3f0]" />
+          <div className="hidden lg:flex items-center gap-3 rounded-xl border border-blue-100 bg-gradient-to-r from-blue-50/80 to-indigo-50/50 px-4 py-3 text-xs text-blue-900 font-medium shadow-xs shrink-0">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-100 text-[#1688f9]">
+              <Plane className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="font-bold text-slate-800">Instant Automation</div>
+              <div className="text-[11px] text-slate-500">Live ticket preview & WhatsApp sync</div>
+            </div>
           </div>
         </div>
 
         <StepBar />
 
-        <div className="grid gap-4 xl:grid-cols-[1fr_338px]">
-          <div className="space-y-4">
+        <div className="grid gap-4 xl:grid-cols-[1fr_330px] 2xl:grid-cols-[1fr_360px]">
+          <div className="space-y-4 min-w-0">
             <FormCard icon={User} title="Customer Details" subtitle="Enter passenger information and contact details.">
               <div className="grid gap-4 md:grid-cols-3">
                 <Input label="Full Name" required icon={User} placeholder="e.g. Rahul Sharma" value={values.name} onChange={set("name")} error={errors.name} />
@@ -196,7 +200,7 @@ export default function AddBookingPage() {
             </FormCard>
           </div>
 
-          <aside className="space-y-4 lg:sticky lg:top-4 self-start">
+          <aside className="space-y-4 lg:sticky lg:top-4 self-start min-w-0">
             <BoardingPassTicket values={values} formatMoney={formatMoney} />
             <div className="rounded-xl border border-[#dce7f4] bg-white p-4 shadow-sm">
               <h3 className="mb-3 text-base font-extrabold text-slate-800">What happens next?</h3>

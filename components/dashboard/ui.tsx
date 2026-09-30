@@ -25,23 +25,23 @@ const iconBg: Record<string, string> = {
 
 export function StatCard({ title, value, icon: Icon, tone, delta, sub, negative, href }: { title: string; value: string; icon: LucideIcon; tone: string; delta?: string; sub: string; negative?: boolean; href?: string }) {
   const card = (
-    <div className={`group rounded-xl border p-3.5 sm:p-4 transition-all duration-200 hover:shadow-md ${toneClasses[tone]}`}>
-      <div className="flex items-center justify-between gap-2.5">
+    <div className={`group rounded-xl border p-3 sm:p-3.5 xl:p-4 transition-all duration-200 hover:shadow-md min-w-0 ${toneClasses[tone]}`}>
+      <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-semibold uppercase tracking-wider text-slate-500">{title}</div>
-          <div className="mt-1 text-2xl font-extrabold tracking-tight text-[#071333] tabular-nums sm:text-[28px]">{value}</div>
+          <div className="truncate text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500" title={title}>{title}</div>
+          <div className="mt-1 text-lg sm:text-xl xl:text-2xl 2xl:text-[26px] font-extrabold tracking-tight text-[#071333] tabular-nums truncate" title={value}>{value}</div>
         </div>
-        <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-transform duration-200 group-hover:scale-105 ${iconBg[tone]}`}>
-          <Icon className="h-5 w-5" />
+        <div className={`grid h-9 w-9 sm:h-10 sm:w-10 xl:h-11 xl:w-11 shrink-0 place-items-center rounded-xl transition-transform duration-200 group-hover:scale-105 ${iconBg[tone]}`}>
+          <Icon className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
         </div>
       </div>
-      <div className="mt-2.5 flex items-center text-xs text-slate-500 truncate">
-        {delta ? <span className={`mr-1.5 font-bold ${negative ? "text-rose-600" : "text-emerald-600"}`}>{delta}</span> : null}
+      <div className="mt-2 sm:mt-2.5 flex items-center text-xs text-slate-500 truncate">
+        {delta ? <span className={`mr-1.5 font-bold shrink-0 ${negative ? "text-rose-600" : "text-emerald-600"}`}>{delta}</span> : null}
         <span className="truncate">{sub}</span>
       </div>
     </div>
   );
-  return href ? <Link href={href} className="block transition hover:-translate-y-0.5">{card}</Link> : card;
+  return href ? <Link href={href} className="block min-w-0 transition hover:-translate-y-0.5">{card}</Link> : card;
 }
 
 export function StatusBadge({ value }: { value: string }) {
@@ -253,14 +253,14 @@ export function BookingToolbar({ onExport }: { onExport?: () => void }) {
   );
 }
 
-export function Pagination({ total = 0, page = 1, limit = 8, onPageChange, onLimitChange }: { total?: number; page?: number; limit?: number; onPageChange?: (page: number) => void; onLimitChange?: (limit: number) => void }) {
+export function Pagination({ total = 0, page = 1, limit = 8, label = "records", onPageChange, onLimitChange }: { total?: number; page?: number; limit?: number; label?: string; onPageChange?: (page: number) => void; onLimitChange?: (limit: number) => void }) {
   const from = total === 0 ? 0 : (page - 1) * limit + 1;
   const to = Math.min(page * limit, total);
   const pages = Math.max(1, Math.ceil(total / limit));
   const current = page;
   return (
     <div className="flex flex-col items-center justify-between gap-3 border-t border-[#e5edf6] bg-slate-50/50 px-4 py-3 text-xs sm:text-sm text-slate-600 sm:flex-row">
-      <span className="font-medium">{total === 0 ? "Showing 0 bookings" : `Showing ${from}–${to} of ${total} bookings`}</span>
+      <span className="font-medium">{total === 0 ? `Showing 0 ${label}` : `Showing ${from}–${to} of ${total} ${label}`}</span>
       <div className="flex items-center gap-1.5">
         <button disabled={current <= 1} onClick={() => onPageChange?.(current - 1)} className="grid h-8 w-8 place-items-center rounded-lg border border-[#d6e1ef] bg-white disabled:opacity-30 hover:bg-slate-50 transition" aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></button>
         {pages <= 7 ? Array.from({ length: pages }, (_, i) => i + 1).map((p) => (

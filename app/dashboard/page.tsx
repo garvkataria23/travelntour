@@ -115,34 +115,34 @@ export default function DashboardPage() {
           </SectionCard>
         </div>
 
-        <div className="grid gap-3 xl:grid-cols-[1.07fr_.82fr_.8fr]">
-          <SectionCard title="Bookings Overview" subtitle={`Total bookings in the last ${days} days`} action={<label className="flex items-center gap-2 rounded-lg border border-[#d6e1ef] px-3 py-2 text-sm"><select value={days} onChange={(event) => setDays(Number(event.target.value))} className="bg-transparent font-medium outline-none"><option value={7}>Last 7 Days</option><option value={30}>Last 30 Days</option><option value={90}>Last 90 Days</option></select><ChevronDown className="h-4 w-4" /></label>}>
-            <div className="flex h-[210px] items-end gap-6 px-7 pb-9 pt-5">
+        <div className="grid gap-3 lg:grid-cols-1 xl:grid-cols-3">
+          <SectionCard title="Bookings Overview" subtitle={`Total bookings in the last ${days} days`} action={<label className="flex items-center gap-2 rounded-lg border border-[#d6e1ef] px-3 py-1.5 text-xs font-medium"><select value={days} onChange={(event) => setDays(Number(event.target.value))} className="bg-transparent font-medium outline-none"><option value={7}>Last 7 Days</option><option value={30}>Last 30 Days</option><option value={90}>Last 90 Days</option></select><ChevronDown className="h-3.5 w-3.5" /></label>}>
+            <div className="flex h-[210px] items-end gap-3 sm:gap-6 px-4 sm:px-6 pb-9 pt-5">
               {trend.length === 0 ? <p className="text-sm text-[#596782]">No booking data.</p> : trend.map((entry) => {
                 const height = Math.max(entry.count === 0 ? 4 : Math.round((entry.count / maxCount) * barMax), 4);
                 return (
-                  <div key={entry.date} className="flex flex-1 flex-col items-center gap-2">
-                    <span className="text-sm font-bold">{entry.count}</span>
+                  <div key={entry.date} className="flex flex-1 flex-col items-center gap-2 min-w-0">
+                    <span className="text-xs sm:text-sm font-bold truncate">{entry.count}</span>
                     <div className="w-full max-w-[34px] rounded-t-md bg-gradient-to-t from-[#78b9f8] to-[#49a1ff]" style={{ height: `${height}px` }} />
-                    <span className="whitespace-nowrap text-xs text-[#596782]">{entry.date}</span>
+                    <span className="whitespace-nowrap text-[11px] sm:text-xs text-[#596782] truncate">{entry.date}</span>
                   </div>
                 );
               })}
             </div>
-            {todays.error ? <p className="px-7 pb-3 text-xs text-rose-600">{todays.error}</p> : null}
+            {todays.error ? <p className="px-6 pb-3 text-xs text-rose-600">{todays.error}</p> : null}
           </SectionCard>
           <SectionCard title="Message Delivery Status">
-            <div className="flex flex-col items-center gap-5 px-5 pb-7 pt-2 sm:flex-row">
-              <div className="relative h-44 w-44 rounded-full" style={{ background: "conic-gradient(#41c879 0 80%, #3696f5 80% 94%, #ff9f27 94% 97%, #ff315e 97% 100%)" }}>
-                <div className="absolute inset-7 grid place-items-center rounded-full bg-white text-center"><div><div className="text-3xl font-extrabold">{message?.total ?? 0}</div><div className="text-sm text-[#596782]">Total Messages</div></div></div>
+            <div className="flex flex-col items-center justify-center gap-4 px-4 pb-6 pt-2 xl:flex-row 2xl:gap-5">
+              <div className="relative h-36 w-36 sm:h-40 sm:w-40 shrink-0 rounded-full" style={{ background: "conic-gradient(#41c879 0 80%, #3696f5 80% 94%, #ff9f27 94% 97%, #ff315e 97% 100%)" }}>
+                <div className="absolute inset-5 sm:inset-6 grid place-items-center rounded-full bg-white text-center"><div><div className="text-2xl sm:text-3xl font-extrabold">{message?.total ?? 0}</div><div className="text-[11px] sm:text-xs text-[#596782]">Total Messages</div></div></div>
               </div>
-              <div className="grid gap-4 text-sm">
+              <div className="grid gap-3 text-xs sm:text-sm min-w-0">
                 {[
                   ["Delivered", `${message?.delivered ?? 0}`, "bg-[#41c879]"],
                   ["Sent", `${message?.sent ?? 0}`, "bg-[#3696f5]"],
                   ["Pending", `${message?.pending ?? 0}`, "bg-[#ff9f27]"],
                   ["Failed", `${message?.failed ?? 0}`, "bg-[#ff315e]"],
-                ].map(([label, value, color]) => <div key={label} className="grid grid-cols-[14px_1fr_auto] items-center gap-3"><span className={`h-3.5 w-3.5 rounded-full ${color}`} /><span>{label}</span><b>{value}</b></div>)}
+                ].map(([label, value, color]) => <div key={label} className="grid grid-cols-[12px_1fr_auto] items-center gap-2.5 sm:gap-3"><span className={`h-3 w-3 rounded-full ${color}`} /><span>{label}</span><b>{value}</b></div>)}
               </div>
             </div>
           </SectionCard>

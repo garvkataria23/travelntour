@@ -294,9 +294,8 @@ export default function ReportsPage() {
         {bookingsRep.error ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{bookingsRep.error}</p> : null}
         {exportError ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{exportError}</p> : null}
 
-        <div className="grid gap-3 xl:grid-cols-[1fr_205px]">
-          <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{statCards.map((s) => <StatCard key={s.title} {...s} />)}</div>
+        <div className="space-y-4 min-w-0">
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">{statCards.map((s) => <StatCard key={s.title} {...s} />)}</div>
 
             <div className="flex flex-wrap gap-2 border-b border-[#dce7f4]">
               {TABS.map((t) => (
@@ -526,7 +525,6 @@ export default function ReportsPage() {
             ) : null}
           </div>
         </div>
-      </div>
 
       {routesOpen ? (
         <div className="fixed inset-0 z-40 grid place-items-center bg-black/30 p-4">

@@ -112,7 +112,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <CurrencyProvider businessCurrency={me.data?.business?.currency}>
-      <div className="flyconnect-app min-h-screen bg-[#f4f9ff] text-[#08142e]">
+      <div className="flyconnect-app min-h-screen overflow-x-clip bg-[#f4f9ff] text-[#08142e]">
         <Sidebar
           open={open}
           onClose={() => setOpen(false)}
@@ -123,7 +123,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           hovered={railHover}
           onHoverChange={setRailHover}
         />
-        <div className={`min-h-screen transition-[padding] duration-200 ${paddingLeft}`}>
+        <div className={`min-h-screen overflow-x-clip transition-[padding] duration-200 ${paddingLeft}`}>
           <Topbar onMenu={() => setOpen(true)} user={user} businessName={businessName} onLogout={() => setLogoutOpen(true)} />
           {offline ? (
             <div className="flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm font-semibold text-amber-800" role="status">
@@ -131,7 +131,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               Offline — showing saved data. Reconnecting…
             </div>
           ) : null}
-          <main className="mx-auto w-full max-w-[1720px] px-3.5 py-4 sm:px-6 lg:px-6 xl:px-8 2xl:px-10">{children}</main>
+          <main className="mx-auto w-full max-w-[1720px] min-w-0 px-3.5 py-4 sm:px-6 lg:px-6 xl:px-8 2xl:px-10">{children}</main>
         </div>
         <LogoutDialog
           open={logoutOpen}
@@ -316,17 +316,17 @@ function Sidebar({
 
 function Topbar({ onMenu, user, businessName, onLogout }: { onMenu: () => void; user: ApiUser; businessName: string; onLogout: () => void }) {
   return (
-    <header className="sticky top-0 z-30 flex h-[62px] items-center justify-between border-b border-[#d9e4f2] bg-white/95 px-4 backdrop-blur sm:px-6 lg:px-8">
-      <div className="flex flex-1 items-center gap-3">
-        <button className="rounded-lg border border-slate-200 p-2 lg:hidden" onClick={onMenu} type="button">
+    <header className="sticky top-0 z-30 flex h-[62px] items-center justify-between border-b border-[#d9e4f2] bg-white/95 px-3.5 backdrop-blur sm:px-6 lg:px-8">
+      <div className="flex flex-1 items-center gap-2 sm:gap-3 min-w-0 pr-2">
+        <button className="rounded-lg border border-slate-200 p-2 lg:hidden shrink-0" onClick={onMenu} type="button" aria-label="Open navigation menu">
           <Menu className="h-5 w-5 text-slate-700" />
         </button>
         <GlobalSearch />
       </div>
-      <div className="ml-3 flex items-center gap-2 sm:gap-3.5">
+      <div className="ml-auto flex items-center gap-2 sm:gap-3 shrink-0">
         <Link
           href="/bookings/add"
-          className="hidden md:inline-flex items-center gap-1.5 rounded-lg bg-[#218bf3] px-3.5 py-2 text-[13px] font-bold text-white shadow-sm shadow-[#218bf3]/25 transition hover:bg-[#127bdc] active:scale-[0.98]"
+          className="hidden xl:inline-flex items-center gap-1.5 rounded-lg bg-[#218bf3] px-3.5 py-2 text-[13px] font-bold text-white shadow-sm shadow-[#218bf3]/25 transition hover:bg-[#127bdc] active:scale-[0.98] shrink-0"
         >
           <Plus className="h-4 w-4 stroke-[2.5]" />
           <span>New Booking</span>
@@ -489,7 +489,7 @@ function GlobalSearch() {
   const showResults = open && (loading || customerCount > 0 || bookingCount > 0 || !!results);
 
   return (
-    <div className="relative w-full max-w-[628px]">
+    <div className="relative w-full max-w-[320px] sm:max-w-[400px] xl:max-w-[480px] 2xl:max-w-[560px] min-w-0">
       <div className={`flex h-[42px] w-full items-center gap-3 rounded-xl border bg-[#f5f8fc] px-3 shadow-sm ${open ? "border-[#1688f9] ring-4 ring-blue-100" : "border-[#dde7f3]"}`}>
         <Search className="h-5 w-5 text-[#526486]" />
         <input ref={inputRef} value={query} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onFocus={() => setOpen(true)} className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-[#75829c]" placeholder="Search by PNR, customer name or mobile number..." />
@@ -599,7 +599,7 @@ function AccountMenu({ user, businessName, onLogout }: { user: ApiUser; business
     <div className="relative">
       <button className="flex items-center gap-3" type="button" onClick={() => setOpen((value) => !value)}>
         <span className="grid h-9 w-9 place-items-center rounded-full bg-[#8b22b7] text-sm font-bold text-white">{initials}</span>
-        <span className="hidden text-[14px] font-semibold sm:inline">{businessName}</span>
+        <span className="hidden text-[13px] font-semibold sm:inline truncate max-w-[90px] md:max-w-[130px] xl:max-w-[180px] 2xl:max-w-[240px]" title={businessName}>{businessName}</span>
         <ChevronDown className="h-5 w-5" />
       </button>
       {open ? <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} /> : null}
