@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -50,12 +50,17 @@ export function WhatsAppQuotaBanner({
   const user = getStoredUser();
   const isAdmin = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN" || true; // User Garv Kataria is Admin
 
+  const onQuotaChangeRef = useRef(onQuotaChange);
+  useEffect(() => {
+    onQuotaChangeRef.current = onQuotaChange;
+  }, [onQuotaChange]);
+
   const refresh = () => {
     const q = getStoredQuota(currentApiCount);
     const s = evaluateQuotaStatus(q);
     setQuota(q);
     setStatus(s);
-    onQuotaChange?.(s);
+    onQuotaChangeRef.current?.(s);
   };
 
   useEffect(() => {
