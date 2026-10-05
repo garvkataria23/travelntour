@@ -71,18 +71,26 @@ function store(): Storage {
 
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
-  return store().getItem(ACCESS_KEY) ?? window.sessionStorage.getItem(ACCESS_KEY);
+  return (
+    window.localStorage.getItem(ACCESS_KEY) ??
+    window.sessionStorage.getItem(ACCESS_KEY)
+  );
 }
 
 export function getRefreshToken(): string | null {
   if (typeof window === "undefined") return null;
-  return store().getItem(REFRESH_KEY) ?? window.sessionStorage.getItem(REFRESH_KEY);
+  return (
+    window.localStorage.getItem(REFRESH_KEY) ??
+    window.sessionStorage.getItem(REFRESH_KEY)
+  );
 }
 
 export function getStoredUser(): ApiUser | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = store().getItem(USER_KEY) ?? window.sessionStorage.getItem(USER_KEY);
+    const raw =
+      window.localStorage.getItem(USER_KEY) ??
+      window.sessionStorage.getItem(USER_KEY);
     return raw ? (JSON.parse(raw) as ApiUser) : null;
   } catch {
     return null;
@@ -485,14 +493,13 @@ export async function ensureBackendBridgeToken(force = false): Promise<string | 
               businessId: json.data.user?.businessId || existingUser.businessId,
             }
           : json.data.user;
-        const remember = persist();
-        const target = remember ? window.localStorage : window.sessionStorage;
-        const other = remember ? window.sessionStorage : window.localStorage;
-        target.setItem(ACCESS_KEY, json.data.accessToken);
-        target.setItem(REFRESH_KEY, json.data.refreshToken);
-        target.setItem(USER_KEY, JSON.stringify(mergedUser));
-        other.removeItem(ACCESS_KEY);
-        other.removeItem(REFRESH_KEY);
+        window.localStorage.setItem(PERSIST_KEY, "1");
+        window.localStorage.setItem(ACCESS_KEY, json.data.accessToken);
+        window.localStorage.setItem(REFRESH_KEY, json.data.refreshToken);
+        window.localStorage.setItem(USER_KEY, JSON.stringify(mergedUser));
+        window.sessionStorage.removeItem(ACCESS_KEY);
+        window.sessionStorage.removeItem(REFRESH_KEY);
+        window.sessionStorage.removeItem(USER_KEY);
         void syncUnsyncedLocalBookings(json.data.accessToken);
         return json.data.accessToken;
       })
@@ -505,55 +512,8 @@ export async function ensureBackendBridgeToken(force = false): Promise<string | 
 }
 
 async function tryRefresh(): Promise<boolean> {
-  const refreshToken = getRefreshToken();
-  if (
-    !refreshToken ||
-    refreshToken.startsWith("fc_staff_ref_") ||
-    refreshToken.startsWith("staff_ref_") ||
-    isLocalStaffToken(getAccessToken())
-  ) {
-    const bridged = await ensureBackendBridgeToken(true);
-    return Boolean(bridged);
-  }
-
-  if (!refreshPromise) {
-    refreshPromise = doFetchWithFailover("/auth/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken }),
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const bridged = await ensureBackendBridgeToken(true);
-          return Boolean(bridged);
-        }
-        const json = (await res.json()) as { success: boolean; data?: Partial<ApiSession> };
-        if (!json.success || !json.data?.accessToken) {
-          const bridged = await ensureBackendBridgeToken(true);
-          return Boolean(bridged);
-        }
-        const existingUser = getStoredUser();
-        if (!existingUser) {
-          const bridged = await ensureBackendBridgeToken(true);
-          return Boolean(bridged);
-        }
-        setSession({
-          accessToken: json.data.accessToken,
-          refreshToken: json.data.refreshToken ?? refreshToken,
-          session: json.data.session,
-          user: existingUser,
-        });
-        return true;
-      })
-      .catch(async () => {
-        const bridged = await ensureBackendBridgeToken(true);
-        return Boolean(bridged);
-      })
-      .finally(() => {
-        refreshPromise = null;
-      });
-  }
-  return refreshPromise;
+  const bridged = await ensureBackendBridgeToken(true);
+  return Boolean(bridged);
 }
 
 export interface ApiRequestOptions {
