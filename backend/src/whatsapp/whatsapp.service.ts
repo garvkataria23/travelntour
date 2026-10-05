@@ -122,14 +122,15 @@ export class WhatsAppService {
       );
     }
 
-    const url = `https://graph.facebook.com/${this.apiVersion}/${phoneNumberId}/messages`;
+    let usedPhoneNumberId = phoneNumberId;
 
-    const sendAttempt = async (tplName: string, lang: string): Promise<Response> => {
+    const sendAttempt = async (tplName: string, lang: string, targetPhoneId = phoneNumberId, targetToken = token): Promise<Response> => {
+      const targetUrl = `https://graph.facebook.com/${this.apiVersion}/${targetPhoneId}/messages`;
       try {
-        return await fetch(url, {
+        return await fetch(targetUrl, {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${targetToken}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -178,6 +179,23 @@ export class WhatsAppService {
           break;
         }
       }
+
+      // If secondary WABA templates are still PENDING Meta approval (132001),
+      // fall back to primary sender if configured so customer messages are never dropped.
+      const primaryId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+      const primaryToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
+      if (
+        !response.ok &&
+        Number((body.error as Record<string, unknown> | undefined)?.code) === 132001 &&
+        primaryId &&
+        primaryToken &&
+        phoneNumberId !== primaryId &&
+        process.env.WHATSAPP_DISABLE_PRIMARY_FALLBACK !== 'true'
+      ) {
+        usedPhoneNumberId = primaryId;
+        response = await sendAttempt(params.templateName, params.language, primaryId, primaryToken);
+        body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+      }
     }
 
     if (!response.ok) {
@@ -189,7 +207,7 @@ export class WhatsAppService {
     if (!waMessageId) {
       throw new WhatsAppApiError('INVALID_RESPONSE', 'WhatsApp API returned no message id', false);
     }
-    return { waMessageId, phoneNumberId };
+    return { waMessageId, phoneNumberId: usedPhoneNumberId };
   }
 
   async sendText(params: SendTextParams): Promise<SendResult> {
