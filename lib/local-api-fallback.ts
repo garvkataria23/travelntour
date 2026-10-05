@@ -314,8 +314,30 @@ function toApiBookingRow(b: StaffBookingItem, index: number) {
 }
 
 export function isLocalStaffToken(token?: string | null): boolean {
-  if (!token) return false;
-  return token.startsWith("fc_staff_tok_");
+  if (!token) return true;
+  if (
+    token.startsWith("fc_staff_tok_") ||
+    token.startsWith("staff_jwt_") ||
+    token.startsWith("demo_") ||
+    token.startsWith("local_")
+  ) {
+    return true;
+  }
+  const parts = token.split(".");
+  if (parts.length !== 3) return true;
+  try {
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const json = JSON.parse(typeof atob === "function" ? atob(b64) : Buffer.from(b64, "base64").toString("utf8"));
+    if (json && typeof json.exp === "number") {
+      // Treat token as expired if it expires within the next 60 seconds
+      if (json.exp * 1000 < Date.now() + 60_000) {
+        return true;
+      }
+    }
+  } catch {
+    return true;
+  }
+  return false;
 }
 
 export function handleLocalApiFallback<T>(

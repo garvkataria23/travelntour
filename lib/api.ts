@@ -7,7 +7,7 @@ import { handleLocalApiFallback, isLocalStaffToken } from "@/lib/local-api-fallb
 export const PRIMARY_API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "https://129.159.16.165.sslip.io/api";
 export const FALLBACK_API_BASE =
-  process.env.NEXT_PUBLIC_FALLBACK_API_URL || "https://flyconnect-backend-fallback.onrender.com/api";
+  process.env.NEXT_PUBLIC_FALLBACK_API_URL || PRIMARY_API_BASE;
 
 export let API_BASE = PRIMARY_API_BASE;
 
@@ -295,8 +295,10 @@ async function fetchWithEndpoint(baseUrl: string, path: string, init: RequestIni
   if (init.signal) {
     return fetch(`${cleanBase}${cleanPath}`, init);
   }
+  const method = (init.method || "GET").toUpperCase();
+  const timeoutMs = method === "GET" ? 10000 : 15000;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3500);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(`${cleanBase}${cleanPath}`, {
       ...init,
@@ -308,67 +310,159 @@ async function fetchWithEndpoint(baseUrl: string, path: string, init: RequestIni
 }
 
 async function doFetchWithFailover(path: string, init: RequestInit): Promise<Response> {
-  if (!FALLBACK_API_BASE || FALLBACK_API_BASE === PRIMARY_API_BASE) {
-    return fetchWithEndpoint(API_BASE, path, init);
-  }
-
-  // If currently using fallback, periodically probe if primary came back
-  if (API_BASE === FALLBACK_API_BASE && Date.now() - lastFailoverAt > PROBE_INTERVAL_MS) {
-    try {
-      const probeController = new AbortController();
-      const probeTimer = setTimeout(() => probeController.abort(), 2500);
-      const probe = await fetchWithEndpoint(PRIMARY_API_BASE, "/health", {
-        method: "GET",
-        signal: probeController.signal,
-      });
-      clearTimeout(probeTimer);
-      if (probe.ok) {
-        API_BASE = PRIMARY_API_BASE;
-      } else {
-        lastFailoverAt = Date.now();
-      }
-    } catch {
-      lastFailoverAt = Date.now();
-    }
-  }
-
-  const isGet = (init.method || "GET").toUpperCase() === "GET";
-
-  if (API_BASE === PRIMARY_API_BASE) {
-    try {
-      const res = await fetchWithEndpoint(PRIMARY_API_BASE, path, init);
-      if (isGet && shouldFailover(null, res, init.signal)) {
-        const fallbackRes = await fetchWithEndpoint(FALLBACK_API_BASE, path, init);
-        API_BASE = FALLBACK_API_BASE;
-        lastFailoverAt = Date.now();
-        return fallbackRes;
-      }
-      return res;
-    } catch (err) {
-      if (isGet && shouldFailover(err, undefined, init.signal)) {
-        const fallbackRes = await fetchWithEndpoint(FALLBACK_API_BASE, path, init);
-        API_BASE = FALLBACK_API_BASE;
-        lastFailoverAt = Date.now();
-        return fallbackRes;
-      }
-      throw err;
-    }
-  }
-
-  return fetchWithEndpoint(FALLBACK_API_BASE, path, init);
+  return fetchWithEndpoint(PRIMARY_API_BASE, path, init);
 }
 
 let refreshPromise: Promise<boolean> | null = null;
 let bridgePromise: Promise<string | null> | null = null;
+let localBookingsSyncPromise: Promise<void> | null = null;
 
 /**
- * Transparently upgrades a local Staff/Admin/Demo token (`fc_staff_tok_*`) to a real
- * backend JWT from `POST /auth/login` (`blue`/`aura`) while preserving the active
- * staff member's identity, role, and permissions in `fc_user`.
+ * Automatically pushes any booking that was saved locally in `fc_staff_bookings_attribution_v2`
+ * (with a temporary `crm-*` or `bk_local_*` ID while the browser token was expired) to the live
+ * backend (`POST /api/bookings`), triggering the Paid WhatsApp Template and updating its ID.
  */
-export async function ensureBackendBridgeToken(): Promise<string | null> {
+async function syncUnsyncedLocalBookings(token: string): Promise<void> {
+  if (typeof window === "undefined" || !token || isLocalStaffToken(token)) return;
+  if (localBookingsSyncPromise) return localBookingsSyncPromise;
+
+  localBookingsSyncPromise = (async () => {
+    try {
+      const KEY = "fc_staff_bookings_attribution_v2";
+      const raw = window.localStorage.getItem(KEY);
+      if (!raw) return;
+      const list = JSON.parse(raw) as Array<{
+        id: string;
+        pnr?: string;
+        referenceNumber?: string | null;
+        flightNumber?: string;
+        airline?: string;
+        route?: string;
+        departureDate?: string;
+        status?: string;
+        amount?: number;
+        currency?: string;
+        customerName?: string;
+        customerPhone?: string;
+        syncedToBackend?: boolean;
+      }>;
+      if (!Array.isArray(list)) return;
+
+      const unsynced = list.filter(
+        (b) =>
+          b &&
+          !b.syncedToBackend &&
+          typeof b.id === "string" &&
+          (b.id.startsWith("crm-") || b.id.startsWith("bk_local_")),
+      );
+      if (unsynced.length === 0) return;
+
+      let updated = false;
+      for (const b of unsynced) {
+        try {
+          const cleanPhoneRaw = (b.customerPhone || "+919082864488").replace(/[^\d+]/g, "");
+          const cleanPhone =
+            cleanPhoneRaw.length >= 7
+              ? cleanPhoneRaw.startsWith("+")
+                ? cleanPhoneRaw
+                : `+${cleanPhoneRaw}`
+              : "+919082864488";
+          const custName = (b.customerName || "Traveller").trim();
+          const parts = (b.route || "Dubai (DXB) → London (LHR)").split(/→|->/).map((s) => s.trim());
+
+          // Ensure customer name matches
+          try {
+            const custRes = await fetchWithEndpoint(PRIMARY_API_BASE, "/customers", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ name: custName, phone: cleanPhone }),
+            });
+            if (custRes.ok) {
+              const custJson = (await custRes.json()) as {
+                data?: { id: string; name: string; version?: number; existed?: boolean };
+              };
+              const cData = custJson.data;
+              if (cData?.existed && cData.id && cData.name !== custName) {
+                await fetchWithEndpoint(PRIMARY_API_BASE, `/customers/${cData.id}`, {
+                  method: "PATCH",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                  },
+                  body: JSON.stringify({
+                    name: custName,
+                    ...(typeof cData.version === "number" ? { version: cData.version } : {}),
+                  }),
+                });
+              }
+            }
+          } catch {
+            // ignore
+          }
+
+          const res = await fetchWithEndpoint(PRIMARY_API_BASE, "/bookings", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              customer: { name: custName, phone: cleanPhone },
+              pnr: (b.pnr || "PNR9082").slice(0, 20),
+              referenceNumber: b.referenceNumber || undefined,
+              flightNumber: b.flightNumber || "EK-500",
+              airline: b.airline || "Blue Aura Tours & Travels",
+              from: parts[0] || "Dubai (DXB)",
+              to: parts[1] || "London (LHR)",
+              departureDate: b.departureDate ? b.departureDate.slice(0, 10) : "2026-10-15",
+              departureTime: "09:00",
+              amount: Math.max(0, Number(b.amount) || 0),
+              currency: b.currency || "AED",
+              status: b.status === "PENDING" ? "PENDING" : "CONFIRMED",
+              allowDuplicate: true,
+            }),
+          });
+          if (res.ok) {
+            const json = (await res.json()) as { data?: { id?: string } };
+            if (json.data?.id) {
+              b.id = json.data.id;
+            }
+            b.syncedToBackend = true;
+            updated = true;
+          }
+        } catch {
+          // continue
+        }
+      }
+
+      if (updated) {
+        window.localStorage.setItem(KEY, JSON.stringify(list));
+        invalidate("/bookings");
+        invalidate("/reports/overview");
+        window.dispatchEvent(new CustomEvent("fc:staff-updated"));
+      }
+    } catch {
+      // ignore
+    } finally {
+      localBookingsSyncPromise = null;
+    }
+  })();
+
+  return localBookingsSyncPromise;
+}
+
+/**
+ * Transparently upgrades a local Staff/Admin/Demo token (`fc_staff_tok_*`, `staff_jwt_*`) or
+ * expired token to a real backend JWT from `POST /auth/login` (`blue`/`aura`) while preserving
+ * the active staff member's identity, role, and permissions in `fc_user`.
+ */
+export async function ensureBackendBridgeToken(force = false): Promise<string | null> {
   const current = getAccessToken();
-  if (current && !isLocalStaffToken(current)) {
+  if (!force && current && !isLocalStaffToken(current)) {
+    void syncUnsyncedLocalBookings(current);
     return current;
   }
   if (!bridgePromise) {
@@ -390,9 +484,13 @@ export async function ensureBackendBridgeToken(): Promise<string | null> {
           : json.data.user;
         const remember = persist();
         const target = remember ? window.localStorage : window.sessionStorage;
+        const other = remember ? window.sessionStorage : window.localStorage;
         target.setItem(ACCESS_KEY, json.data.accessToken);
         target.setItem(REFRESH_KEY, json.data.refreshToken);
         target.setItem(USER_KEY, JSON.stringify(mergedUser));
+        other.removeItem(ACCESS_KEY);
+        other.removeItem(REFRESH_KEY);
+        void syncUnsyncedLocalBookings(json.data.accessToken);
         return json.data.accessToken;
       })
       .catch(() => null)
@@ -405,8 +503,13 @@ export async function ensureBackendBridgeToken(): Promise<string | null> {
 
 async function tryRefresh(): Promise<boolean> {
   const refreshToken = getRefreshToken();
-  if (!refreshToken || refreshToken.startsWith("fc_staff_ref_") || isLocalStaffToken(getAccessToken())) {
-    const bridged = await ensureBackendBridgeToken();
+  if (
+    !refreshToken ||
+    refreshToken.startsWith("fc_staff_ref_") ||
+    refreshToken.startsWith("staff_ref_") ||
+    isLocalStaffToken(getAccessToken())
+  ) {
+    const bridged = await ensureBackendBridgeToken(true);
     return Boolean(bridged);
   }
 
@@ -418,16 +521,19 @@ async function tryRefresh(): Promise<boolean> {
     })
       .then(async (res) => {
         if (!res.ok) {
-          const bridged = await ensureBackendBridgeToken();
+          const bridged = await ensureBackendBridgeToken(true);
           return Boolean(bridged);
         }
         const json = (await res.json()) as { success: boolean; data?: Partial<ApiSession> };
         if (!json.success || !json.data?.accessToken) {
-          const bridged = await ensureBackendBridgeToken();
+          const bridged = await ensureBackendBridgeToken(true);
           return Boolean(bridged);
         }
         const existingUser = getStoredUser();
-        if (!existingUser) return false;
+        if (!existingUser) {
+          const bridged = await ensureBackendBridgeToken(true);
+          return Boolean(bridged);
+        }
         setSession({
           accessToken: json.data.accessToken,
           refreshToken: json.data.refreshToken ?? refreshToken,
@@ -437,7 +543,7 @@ async function tryRefresh(): Promise<boolean> {
         return true;
       })
       .catch(async () => {
-        const bridged = await ensureBackendBridgeToken();
+        const bridged = await ensureBackendBridgeToken(true);
         return Boolean(bridged);
       })
       .finally(() => {
@@ -459,9 +565,14 @@ export interface ApiRequestOptions {
 export async function api<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const { method = "GET", body, auth = true, headers = {}, signal, skipCache = false } = options;
 
-  // Ensure any local Staff/Admin/Demo token is transparently upgraded to a real backend JWT
-  if (auth && !path.startsWith("/auth/") && isLocalStaffToken(getAccessToken())) {
-    await ensureBackendBridgeToken();
+  // Ensure any local Staff/Admin/Demo token or expired JWT is transparently upgraded to a real backend JWT
+  if (auth && !path.startsWith("/auth/")) {
+    const currentTok = getAccessToken();
+    if (isLocalStaffToken(currentTok)) {
+      await ensureBackendBridgeToken(true);
+    } else if (currentTok) {
+      void syncUnsyncedLocalBookings(currentTok);
+    }
   }
 
   // If creating a booking with customer details, ensure the customer's name on the backend matches
