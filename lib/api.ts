@@ -348,12 +348,15 @@ async function syncUnsyncedLocalBookings(token: string): Promise<void> {
       }>;
       if (!Array.isArray(list)) return;
 
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const SEED_RE = /^sb-10\d$/;
       const unsynced = list.filter(
         (b) =>
           b &&
           !b.syncedToBackend &&
           typeof b.id === "string" &&
-          (b.id.startsWith("crm-") || b.id.startsWith("bk_local_")),
+          !SEED_RE.test(b.id) &&
+          !UUID_RE.test(b.id),
       );
       if (unsynced.length === 0) return;
 
