@@ -32,27 +32,13 @@ export const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
 
-// Google Drive Provider (drive.file scope allows saving agency backups in user's Google Drive)
-export const googleDriveProvider = new GoogleAuthProvider();
-googleDriveProvider.setCustomParameters({ prompt: "select_account" });
-googleDriveProvider.addScope("https://www.googleapis.com/auth/drive.file");
-googleDriveProvider.addScope("https://www.googleapis.com/auth/drive.metadata.readonly");
-
-export interface DriveStorageQuota {
-  limit: number;
-  usage: number;
-  usageInDrive?: number;
-  usageInGmail?: number;
-  usageInPhotos?: number;
-  percent: number;
-  formattedUsed: string;
-  formattedTotal: string;
-  formattedFree: string;
-  planName?: string;
-  source?: "live" | "custom" | "default";
-  verifiedAt?: string;
-  accountEmail?: string;
-}
+// REMOVED: `googleDriveProvider` and the `drive.file` / `drive.metadata.readonly` scopes.
+//
+// Backups run server-side against a Google *service account* (backend/src/backup). Requesting Drive
+// scopes in the browser put a personal-account access token in client JavaScript, where any XSS or
+// an open DevTools could read it, and where it only ever worked if a human clicked a button - so
+// there was never a real schedule. `signInWithGoogle` below deliberately keeps using the
+// non-sensitive `googleProvider` (profile, email, openid only).
 
 export const formatStorageBytes = (bytes: number): string => {
   if (!bytes || isNaN(bytes) || bytes <= 0) return "0 MB";
@@ -65,103 +51,28 @@ export const formatStorageBytes = (bytes: number): string => {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 };
 
-export function getDefaultQuotaForEmail(email?: string | null): DriveStorageQuota {
-  const clean = (email || "").toLowerCase().trim();
-  if (clean === "garvkataria1@gmail.com") {
-    // 5 TB Google One Plan specifically for garvkataria1@gmail.com
-    return {
-      limit: 5 * 1024 * 1024 * 1024 * 1024,
-      usage: 21.91 * 1024 * 1024 * 1024,
-      usageInDrive: 8.47 * 1024 * 1024 * 1024,
-      usageInPhotos: 12.71 * 1024 * 1024 * 1024,
-      usageInGmail: 0.72 * 1024 * 1024 * 1024,
-      percent: 0.4,
-      formattedUsed: "21.91 GB",
-      formattedTotal: "5.0 TB",
-      formattedFree: "4.98 TB",
-      planName: "5 TB Google One Plan",
-      source: "default",
-      accountEmail: "garvkataria1@gmail.com",
-    };
-  }
-
-  // Baseline standard 15 GB Plan for other unverified accounts
-  const limit = 15 * 1024 * 1024 * 1024;
-  const usage = 0;
-  const free = limit;
-
-  return {
-    limit,
-    usage: 0,
-    usageInDrive: 0,
-    usageInPhotos: 0,
-    usageInGmail: 0,
-    percent: 0,
-    formattedUsed: "0 MB",
-    formattedTotal: "15.0 GB",
-    formattedFree: "15.0 GB",
-    planName: "15 GB Google Drive Storage",
-    source: "default",
-    accountEmail: clean || undefined,
-  };
-}
+/**
+ * REMOVED: `getDefaultQuotaForEmail()`.
+ *
+ * It returned a hardcoded 5 TB Google One plan for a specific personal Gmail address (including
+ * invented per-service usage figures) and a fabricated 15 GB baseline for everyone else, with
+ * `source: "default"` — which the UI then rendered as "Google Drive connected" with a quota.
+ *
+ * Nothing about a Drive account can be known without asking Drive. The backup destination is now a
+ * service account on the server (backend/src/backup), and its real status is reported by
+ * `GET /backups/destination` plus `POST /backups/destination/verify`, which actually contacts
+ * Google. If no quota is available, the UI says so rather than inventing one.
+ */
 
 /**
- * Fetch Google Drive storage quota using the user's OAuth access token.
+ * REMOVED: `fetchDriveQuota()` and the `DriveStorageQuota` type.
+ *
+ * It read the *user's personal* Drive quota with a browser-held bearer token. Beyond exposing that
+ * token, the quota was the wrong thing to show: it described the operator's own Google account, not
+ * the backup destination. The destination is a service-account Drive folder, whose real status comes
+ * from `GET /backups/destination` and `POST /backups/destination/verify`, which actually contact
+ * Google. When no quota is available the UI reports that rather than inventing one.
  */
-export async function fetchDriveQuota(accessToken: string): Promise<DriveStorageQuota | null> {
-  try {
-    const res = await fetch("https://www.googleapis.com/drive/v3/about?fields=storageQuota,user", {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-    if (!res.ok) {
-      console.warn("Drive about API returned status", res.status);
-      return null;
-    }
-    const data = await res.json();
-    const sq = data.storageQuota;
-    if (!sq) return null;
-
-    const limit = sq.limit ? Number(sq.limit) : 15 * 1024 * 1024 * 1024;
-    const usage = sq.usage ? Number(sq.usage) : 0;
-    const usageInDrive = sq.usageInDrive ? Number(sq.usageInDrive) : 0;
-    const free = Math.max(0, limit - usage);
-    const percent = limit > 0 ? Math.min(100, Number(((usage / limit) * 100).toFixed(1))) : 0;
-
-    const otherUsage = Math.max(0, usage - usageInDrive);
-    const usageInPhotos = otherUsage > 0 ? Math.round(otherUsage * 0.6) : 0;
-    const usageInGmail = otherUsage > 0 ? Math.round(otherUsage * 0.4) : 0;
-
-    const isTB = limit >= 1024 * 1024 * 1024 * 1024;
-    const planName = isTB
-      ? `${(limit / (1024 * 1024 * 1024 * 1024)).toFixed(1)} TB Google One`
-      : `${(limit / (1024 * 1024 * 1024)).toFixed(0)} GB Google Drive`;
-
-    const verifiedAt = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    const accountEmail = data.user?.emailAddress || undefined;
-
-    return {
-      limit,
-      usage,
-      usageInDrive,
-      usageInPhotos,
-      usageInGmail,
-      percent,
-      formattedUsed: formatStorageBytes(usage),
-      formattedTotal: formatStorageBytes(limit),
-      formattedFree: formatStorageBytes(free),
-      planName,
-      source: "live",
-      verifiedAt,
-      accountEmail,
-    };
-  } catch (err) {
-    console.error("Failed to fetch drive quota:", err);
-    return null;
-  }
-}
 
 /**
  * Sign in using Google OAuth Popup and return user and OAuth access token.
@@ -176,35 +87,23 @@ export async function signInWithGoogle(provider: GoogleAuthProvider = googleProv
 }
 
 /**
- * Secondary isolated Firebase Auth instance specifically for Google Drive OAuth
- * so connecting Google Drive never overwrites or interferes with the user's primary login session!
+ * REMOVED: browser-side Google Drive OAuth (`getGDriveAuth`, `connectGoogleDrive`,
+ * `disconnectGoogleDrive`).
+ *
+ * Why it had to go:
+ *
+ *   - The access token lived in the browser. Anyone with an XSS, or anyone opening DevTools, could
+ *     read it and read or write the folder holding every tenant's data.
+ *   - It could only run when a human clicked a button, so there was no schedule and therefore no
+ *     real backup.
+ *   - It targeted the *user's personal* Drive, so the archive's survival depended on one individual
+ *     account staying alive.
+ *   - `disconnectGoogleDrive()` was an empty function: it revoked nothing, so the Google grant
+ *     outlived every "disconnect" the UI ever displayed.
+ *
+ * Backups now go through a Google *service account* on the server (backend/src/backup), with the
+ * credential never leaving the host and the schedule running unattended.
  */
-export function getGDriveAuth() {
-  const gdriveApp =
-    getApps().find((a) => a.name === "gdrive") ||
-    initializeApp(firebaseConfig, "gdrive");
-  return getAuth(gdriveApp);
-}
-
-/**
- * Connect Google Drive via popup with Drive permissions without modifying the primary application session.
- */
-export async function connectGoogleDrive(): Promise<{ user: User; accessToken: string | null }> {
-  const gAuth = getGDriveAuth();
-  const result = await signInWithPopup(gAuth, googleDriveProvider);
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  return {
-    user: result.user,
-    accessToken: credential?.accessToken ?? null,
-  };
-}
-
-/**
- * Disconnect Google Drive without logging the user out of FlyConnect.
- */
-export async function disconnectGoogleDrive(): Promise<void> {
-  // Do NOT call signOut(auth) so the user's FlyConnect application session is NEVER destroyed!
-}
 
 /**
  * Sign in using Email and Password.

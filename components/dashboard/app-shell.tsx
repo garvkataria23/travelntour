@@ -10,10 +10,23 @@ import { CurrencyProvider, useCurrency } from "@/lib/currency";
 import { logOut as firebaseLogOut } from "@/lib/firebase";
 import { CollaboratorPresence } from "@/components/collaborator-presence";
 import { isAccountBlocked } from "@/lib/admin-accounts";
+import { hasAnyPermission, visibleNavGroups, type Permission } from "@/lib/permissions";
+import { formatPhoneDisplay } from "@/lib/phone-utils";
+
+export interface NavItem {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  /**
+   * Capabilities required to see this entry. `undefined` means every signed-in member of a tenant
+   * may see it; an empty array means nobody except SUPER_ADMIN, who passes every check anyway.
+   */
+  permissions?: Permission[];
+}
 
 export interface NavGroup {
   title: string;
-  items: Array<{ label: string; href: string; icon: LucideIcon }>;
+  items: NavItem[];
 }
 
 export const NAV_GROUPS: NavGroup[] = [
@@ -21,34 +34,34 @@ export const NAV_GROUPS: NavGroup[] = [
     title: "Operations",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: Home },
-      { label: "Bookings", href: "/bookings", icon: Plane },
-      { label: "Add Booking", href: "/bookings/add", icon: Plus },
-      { label: "Upcoming Journeys", href: "/upcoming-journeys", icon: CalendarCheck },
+      { label: "Bookings", href: "/bookings", icon: Plane, permissions: ["booking:view"] },
+      { label: "Add Booking", href: "/bookings/add", icon: Plus, permissions: ["booking:create"] },
+      { label: "Upcoming Journeys", href: "/upcoming-journeys", icon: CalendarCheck, permissions: ["booking:view"] },
     ],
   },
   {
     title: "Communications",
     items: [
-      { label: "Customers", href: "/customers", icon: Users },
-      { label: "WhatsApp Messages", href: "/whatsapp-messages", icon: MessageCircle },
-      { label: "Automation", href: "/automation", icon: Settings },
-      { label: "Message Templates", href: "/message-templates", icon: FileText },
+      { label: "Customers", href: "/customers", icon: Users, permissions: ["customer:view"] },
+      { label: "WhatsApp Messages", href: "/whatsapp-messages", icon: MessageCircle, permissions: ["whatsapp:view-messages"] },
+      { label: "Automation", href: "/automation", icon: Settings, permissions: ["automation:view"] },
+      { label: "Message Templates", href: "/message-templates", icon: FileText, permissions: ["template:view"] },
     ],
   },
   {
     title: "Financials",
     items: [
-      { label: "Reports", href: "/reports", icon: BarChart3 },
-      { label: "Invoices", href: "/invoices", icon: Receipt },
-      { label: "Expenses", href: "/expenses", icon: Wallet },
-      { label: "Income", href: "/income", icon: Banknote },
+      { label: "Reports", href: "/reports", icon: BarChart3, permissions: ["report:view-operational"] },
+      { label: "Invoices", href: "/invoices", icon: Receipt, permissions: ["invoice:view"] },
+      { label: "Expenses", href: "/expenses", icon: Wallet, permissions: ["expense:view"] },
+      { label: "Income", href: "/income", icon: Banknote, permissions: ["income:view"] },
       { label: "Currency", href: "/currency", icon: RefreshCw },
     ],
   },
   {
     title: "System",
     items: [
-      { label: "Settings", href: "/settings", icon: Workflow },
+      { label: "Settings", href: "/settings", icon: Workflow, permissions: ["settings:view"] },
     ],
   },
 ];
@@ -283,6 +296,9 @@ function Sidebar({
 }) {
   const pathname = usePathname();
   const full = pinned || hovered || open;
+  // Only render what this role can reach. Groups that end up empty are dropped entirely, so a
+  // STAFF account is not shown an empty "Financials" heading.
+  const groups = visibleNavGroups(NAV_GROUPS, hasAnyPermission);
   const initials = (user.name || user.email || "?")
     .split(/\s+/)
     .map((part) => part[0])
@@ -341,7 +357,7 @@ function Sidebar({
         </div>
 
         <nav className="no-scrollbar mt-2 flex-1 space-y-3 overflow-y-auto px-2.5 py-1">
-          {NAV_GROUPS.map((group) => (
+          {groups.map((group) => (
             <div key={group.title} className="space-y-0.5">
               {full ? (
                 <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400/90">
@@ -469,9 +485,10 @@ function CurrencyToggle() {
   }, [open]);
 
   const term = query.trim().toLowerCase();
-  const filtered = options
-    .filter((option) => !term || option.code.toLowerCase().includes(term) || option.name.toLowerCase().includes(term))
-    .slice(0, 60);
+  const POPULAR_QUICK = ["AED", "USD", "EUR", "GBP", "INR", "SAR", "QAR", "KWD", "CAD", "AUD", "SGD"];
+  const filtered = options.filter(
+    (option) => !term || option.code.toLowerCase().includes(term) || option.name.toLowerCase().includes(term),
+  );
 
   return (
     <div className="relative" ref={ref}>
@@ -488,16 +505,41 @@ function CurrencyToggle() {
       </button>
 
       {open ? (
-        <div className="absolute right-0 top-[46px] z-40 w-[290px] overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-xl">
+        <div className="absolute right-0 top-[46px] z-40 w-[320px] overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-xl">
           <div className="border-b border-[#eef3f9] p-2">
             <input
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search currency…"
+              placeholder="Search code or name (e.g. USD, Rupee)…"
               className="w-full rounded-lg border border-[#e2eaf5] px-2.5 py-1.5 text-[13px] outline-none focus:border-[#1688f9]"
             />
           </div>
+          {!term && (
+            <div className="border-b border-[#eef3f9] bg-[#f8fbff] p-2">
+              <div className="mb-1.5 text-[10px] font-extrabold uppercase tracking-wide text-[#7c8aa3]">Popular</div>
+              <div className="flex flex-wrap gap-1.5">
+                {POPULAR_QUICK.map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => {
+                      setDisplay(code);
+                      setOpen(false);
+                      setQuery("");
+                    }}
+                    className={`rounded-md border px-2 py-0.5 text-[11px] font-extrabold transition ${
+                      display === code
+                        ? "border-[#1688f9] bg-[#1688f9] text-white"
+                        : "border-[#dce7f4] bg-white text-[#3d4d6b] hover:border-[#1688f9]"
+                    }`}
+                  >
+                    {code}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="max-h-[320px] overflow-y-auto">
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-center text-[13px] text-[#7c8aa3]">No currency matches “{query}”</div>
@@ -526,8 +568,9 @@ function CurrencyToggle() {
               })
             )}
           </div>
-          <div className="border-t border-[#eef3f9] px-3 py-2 text-[11px] text-[#7c8aa3]">
-            Amounts are stored in {base} and converted for display.
+          <div className="flex items-center justify-between border-t border-[#eef3f9] px-3 py-2 text-[11px] text-[#7c8aa3]">
+            <span>{options.length} live currencies</span>
+            <span>Saved in {base}</span>
           </div>
         </div>
       ) : null}
@@ -559,8 +602,14 @@ function GlobalSearch() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
+    // clearTimeout only cancels a timer that has not fired yet. Once a request is in flight it
+    // used to keep running, so a slower earlier response could overwrite a newer one, and a
+    // request for a term the user had already cleared would repopulate stale results.
+    // An AbortController plus a monotonic request id makes only the latest query authoritative.
+    const controller = new AbortController();
     const timer = setTimeout(() => {
       const term = query.trim();
       if (term.length < 2) {
@@ -569,12 +618,30 @@ function GlobalSearch() {
         return;
       }
       setLoading(true);
-      api<SearchResults>(`/search?q=${encodeURIComponent(term)}`, { auth: true, skipCache: true })
-        .then((result) => setResults(result))
-        .catch(() => setResults(null))
-        .finally(() => setLoading(false));
+      requestIdRef.current += 1;
+      const requestId = requestIdRef.current;
+      api<SearchResults>(`/search?q=${encodeURIComponent(term)}`, {
+        auth: true,
+        skipCache: true,
+        signal: controller.signal,
+      })
+        .then((result) => {
+          if (requestId !== requestIdRef.current) return;
+          setResults(result);
+        })
+        .catch((err) => {
+          if (controller.signal.aborted || requestId !== requestIdRef.current) return;
+          setResults(null);
+        })
+        .finally(() => {
+          if (requestId !== requestIdRef.current) return;
+          setLoading(false);
+        });
     }, 300);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [query]);
 
   useEffect(() => {
@@ -611,7 +678,7 @@ function GlobalSearch() {
                 <div className="px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-[#8a97ad]">Customers</div>
                 {results!.customers.map((customer) => <button key={customer.id} onClick={() => { setOpen(false); router.push(`/customers/${customer.id}`); }} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-slate-50">
                   <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-blue-100 font-bold text-blue-700"><Users className="h-4 w-4" /></span>
-                  <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{customer.name}</span><span className="block truncate text-[13px] text-[#596782]">{customer.phone ?? customer.email ?? "—"}</span></span>
+                  <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{customer.name}</span><span className="block truncate text-[13px] text-[#596782]">{customer.phone ? formatPhoneDisplay(customer.phone) : customer.email ?? "—"}</span></span>
                 </button>)}
               </div> : null}
               {bookingCount > 0 ? <div className="border-t border-[#e5edf6] p-2">
@@ -691,7 +758,20 @@ function statusIcon(status: string): ReactNode {
 }
 
 function AccountMenu({ user, businessName, onLogout }: { user: ApiUser; businessName: string; onLogout: () => void }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [staffAccounts, setStaffAccounts] = useState<Array<{ id: string; name: string; email: string; password?: string; role: string; status: string }>>([]);
+
+  useEffect(() => {
+    if (open) {
+      import("@/lib/staff-management")
+        .then(({ getStoredStaff }) => {
+          setStaffAccounts(getStoredStaff().filter((m) => m.status === "ACTIVE"));
+        })
+        .catch(() => {});
+    }
+  }, [open]);
+
   const initials = (user.name || user.email || "?")
     .split(/\s+/)
     .map((part) => part[0])
@@ -700,32 +780,127 @@ function AccountMenu({ user, businessName, onLogout }: { user: ApiUser; business
     .join("")
     .toUpperCase();
 
+  const roleBadgeClass =
+    user.role === "SUPER_ADMIN"
+      ? "bg-violet-100 text-violet-800 border-violet-200"
+      : user.role === "ADMIN"
+      ? "bg-blue-100 text-blue-800 border-blue-200"
+      : user.role === "MANAGER"
+      ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+      : "bg-amber-100 text-amber-800 border-amber-200";
+
   return (
     <div className="relative">
-      <button className="flex items-center gap-3" type="button" onClick={() => setOpen((value) => !value)}>
+      <button className="flex items-center gap-2.5" type="button" onClick={() => setOpen((value) => !value)}>
         <span className="grid h-9 w-9 place-items-center rounded-full bg-[#8b22b7] text-sm font-bold text-white">{initials}</span>
-        <span className="hidden text-[13px] font-semibold sm:inline truncate max-w-[90px] md:max-w-[130px] xl:max-w-[180px] 2xl:max-w-[240px]" title={businessName}>{businessName}</span>
-        <ChevronDown className="h-5 w-5" />
+        <div className="hidden text-left sm:block">
+          <div className="truncate text-[13px] font-bold text-slate-900 max-w-[110px] md:max-w-[150px] leading-tight">
+            {user.name || businessName}
+          </div>
+          <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-blue-600">
+            <span>{user.role || "STAFF"}</span>
+          </div>
+        </div>
+        <ChevronDown className="h-4 w-4 text-slate-500" />
       </button>
       {open ? <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} /> : null}
       {open ? (
-        <div className="absolute right-0 top-[54px] z-30 w-[240px] overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-2xl">
-          <div className="border-b border-[#e5edf6] px-4 py-3">
-            <div className="text-sm font-bold">{user.name}</div>
-            <div className="mt-0.5 text-xs text-[#596782]">{user.email}<span className="ml-2 rounded bg-[#e8edf5] px-1.5 py-0.5 text-[#405174] capitalize">{user.role?.toLowerCase()}</span></div>
+        <div className="absolute right-0 top-[54px] z-30 w-[300px] overflow-hidden rounded-2xl border border-[#dce7f4] bg-white shadow-2xl">
+          <div className="border-b border-[#e5edf6] bg-slate-50/70 px-4 py-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="truncate text-sm font-extrabold text-slate-900">{user.name}</div>
+              <span className={`rounded-md border px-2 py-0.5 text-[10px] font-extrabold ${roleBadgeClass}`}>
+                {user.role || "STAFF"}
+              </span>
+            </div>
+            <div className="mt-1 truncate font-mono text-xs text-[#596782]">{user.email}</div>
           </div>
+
           {user.role === "SUPER_ADMIN" ? (
             <Link
               href="/admin"
               onClick={() => setOpen(false)}
-              className="flex items-center gap-2 border-b border-amber-200 bg-amber-50/80 px-4 py-2.5 text-sm font-bold text-amber-900 transition hover:bg-amber-100"
+              className="flex items-center gap-2 border-b border-amber-200 bg-amber-50/80 px-4 py-2.5 text-xs font-extrabold text-amber-900 transition hover:bg-amber-100"
             >
               <ShieldAlert className="h-4 w-4 text-amber-600" />
-              Master Admin Panel
+              Master Super Admin Panel
             </Link>
           ) : null}
-          <Link href="/settings" onClick={() => setOpen(false)} className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition hover:bg-slate-50"><Settings className="h-4 w-4" />Settings</Link>
-          <button onClick={onLogout} className="flex w-full items-center gap-2 px-4 py-2.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50"><LogOut className="h-4 w-4" />Log out</button>
+
+          {(user.role === "SUPER_ADMIN" || user.role === "ADMIN") && (
+            <Link
+              href="/settings?tab=team"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5 text-xs font-bold text-blue-700 transition hover:bg-blue-50"
+            >
+              <Users className="h-4 w-4 text-blue-600" />
+              Manage Staff, Roles & Bookings
+            </Link>
+          )}
+
+          <Link
+            href="/settings"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            <Settings className="h-4 w-4 text-slate-500" />
+            Agency & Profile Settings
+          </Link>
+
+          {/* Quick Role / Staff Switcher for testing separate logins */}
+          {staffAccounts.length > 1 && (
+            <div className="border-b border-slate-100 px-3 py-2.5">
+              <div className="mb-1.5 px-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                Switch Role / Staff Login
+              </div>
+              <div className="max-h-36 space-y-1 overflow-y-auto">
+                {staffAccounts
+                  .filter((acc) => acc.email.toLowerCase() !== user.email?.toLowerCase())
+                  .map((acc) => (
+                    <button
+                      key={acc.id}
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const { authenticateStaffCredentials } = await import("@/lib/staff-management");
+                          const { setSession } = await import("@/lib/api");
+                          const sess = authenticateStaffCredentials(acc.email, acc.password || "Staff@123");
+                          setSession(sess);
+                          setOpen(false);
+                          if (acc.role === "SUPER_ADMIN") {
+                            router.push("/admin");
+                          } else {
+                            router.push("/dashboard");
+                          }
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition hover:bg-blue-50"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-bold text-slate-800">{acc.name}</div>
+                        <div className="truncate font-mono text-[10px] text-slate-400">{acc.email}</div>
+                      </div>
+                      <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-extrabold text-slate-700">
+                        {acc.role}
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={() => {
+              setOpen(false);
+              onLogout();
+            }}
+            className="flex w-full items-center gap-2 px-4 py-3 text-xs font-extrabold text-rose-600 transition hover:bg-rose-50"
+          >
+            <LogOut className="h-4 w-4" />
+            Log Out ({user.email})
+          </button>
         </div>
       ) : null}
     </div>

@@ -158,7 +158,9 @@ export default function MessageTemplatesPage() {
   const list = useApi<TemplateList>(`/templates?${params.toString()}`);
   const customers = useApi<CustomerList>("/customers?limit=200");
 
-  const items = list.data?.items ?? [];
+  // Memoised so the identity is stable: a bare `?? []` produced a new array each render, which made
+  // the selection effect below re-run on every render of the page.
+  const items = useMemo(() => list.data?.items ?? [], [list.data]);
   const meta = list.data?.meta;
 
   const selected = items.find((t) => t.id === selectedId) ?? items[0] ?? null;

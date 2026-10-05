@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { compressJson, compressPdf, decompressJson } from './pdf-compression';
+import { compressJson, compressPdf } from './pdf-compression';
 import { StorageService } from './storage.service';
 
 /**
@@ -36,6 +36,9 @@ function makeService(overrides: Record<string, unknown> = {}) {
 
 const payload = { total: 12600, renderedAt: '2026-09-27T10:00:00.000Z' } as never;
 const pdf = Buffer.from('%PDF-1.4\n' + 'x'.repeat(4000) + '\n%%EOF');
+
+/** Arbitrary tenant id; every sweep assertion checks the caller's own scope is applied. */
+const TENANT = 'biz-tenant-a';
 
 /**
  * A realistically shaped payload, not a two-field stub.
@@ -387,11 +390,36 @@ describe('StorageService.sweep', () => {
     const { service } = makeService({ refreshToken: { deleteMany } });
 
     const now = new Date('2026-09-27T12:00:00Z');
-    await service.sweep({ now, tokenMaxAgeDays: 30 });
+    await service.sweep(TENANT, { now, tokenMaxAgeDays: 30 });
 
     const where = deleteMany.mock.calls[0][0] as { where: { createdAt: { lt: Date } } };
     const expected = new Date(now.getTime() - 30 * 86_400_000);
     expect(where.where.createdAt.lt.getTime()).toBe(expected.getTime());
+  });
+
+  it('scopes the token sweep to the caller tenant', async () => {
+    // Regression guard. Neither the token delete nor the invoice prune had a businessId filter, so
+    // any tenant admin running "cleanup" destroyed every tenant's refresh tokens and invoice PDFs.
+    const deleteMany = jest.fn(async (_args: unknown) => ({ count: 0 }));
+    const updateMany = jest.fn(async (_args: unknown) => ({ count: 0 }));
+    const { service } = makeService({
+      refreshToken: { deleteMany },
+      invoiceDocument: { findUnique: jest.fn(async () => null), upsert: jest.fn(), updateMany, aggregate: jest.fn() },
+    });
+
+    await service.sweep('biz-tenant-a', { now: new Date('2026-09-27T12:00:00Z') });
+
+    expect((deleteMany.mock.calls[0][0] as any).where.user.businessId).toBe('biz-tenant-a');
+    expect((updateMany.mock.calls[0][0] as any).where.businessId).toBe('biz-tenant-a');
+  });
+
+  it('rejects a retention window below one day', async () => {
+    // `invoicePruneAfterDays=0` matched every unpruned invoice and nulled its stored PDF.
+    const { service } = makeService();
+    await expect(
+      service.sweep(TENANT, { invoicePruneAfterDays: 0.0001 }),
+    ).rejects.toThrow(/at least 1 day/);
+    await expect(service.sweep(TENANT, { tokenMaxAgeDays: 0 })).rejects.toThrow(/at least 1 day/);
   });
 
   it('empties invoice bytes but keeps the row and its audit trail', async () => {
@@ -407,7 +435,7 @@ describe('StorageService.sweep', () => {
     });
 
     const now = new Date('2026-09-27T12:00:00Z');
-    const result = await service.sweep({ now, invoicePruneAfterDays: 255 });
+    const result = await service.sweep(TENANT, { now, invoicePruneAfterDays: 255 });
 
     const arg = updateMany.mock.calls[0][0] as {
       data: { pdf: Buffer; storedBytes: number; prunedAt: Date };
@@ -428,7 +456,7 @@ describe('StorageService.sweep', () => {
 
   it('keeps a full financial year of invoice documents by default', async () => {
     const { service } = makeService();
-    const result = await service.sweep({ now: new Date('2026-09-27T12:00:00Z') });
+    const result = await service.sweep(TENANT, { now: new Date('2026-09-27T12:00:00Z') });
     expect(result.invoicePruneAfterDays).toBe(255);
     expect(result.tokenMaxAgeDays).toBe(30);
   });

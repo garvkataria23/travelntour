@@ -2,6 +2,8 @@ import { createHash } from 'crypto';
 import { jsPDF } from 'jspdf';
 import { Booking, Customer, InvoiceItem } from '@prisma/client';
 import { BASE_CURRENCY, minorUnitDigits } from '../currency/decimals';
+import type { MoneyValue } from '../common/invoice-totals';
+import { toNumber } from '../common/money';
 
 export interface InvoicePdfInput {
   booking: Booking;
@@ -9,7 +11,7 @@ export interface InvoicePdfInput {
   business: { name?: string | null; email?: string | null; phone?: string | null; logo?: string | null };
   setting: {
     gstin?: string | null;
-    gstRate?: number | null;
+    gstRate?: MoneyValue;
     gstEnabled?: boolean | null;
     taxLabel?: string | null;
     bankName?: string | null;
@@ -228,43 +230,64 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
 
   // ----- Items table -----
   y = Math.max(metaY + 14, 214);
-  doc.setFillColor(240, 245, 252);
-  doc.rect(margin, y - 13, contentWidth, 20, 'F');
   const cols: Array<{ label: string; x: number; w: number }> = [
     { label: 'DESCRIPTION / SERVICE', x: margin, w: contentWidth * 0.5 },
     { label: 'QTY', x: margin + contentWidth * 0.5, w: contentWidth * 0.12 },
     { label: 'UNIT PRICE', x: margin + contentWidth * 0.62, w: contentWidth * 0.19 },
     { label: 'AMOUNT', x: margin + contentWidth * 0.81, w: contentWidth * 0.19 },
   ];
-  for (const col of cols) {
-    textY(col.label, col.x + (col.label === 'DESCRIPTION / SERVICE' ? 0 : 12), y, {
-      size: 7.5,
-      bold: true,
-      color: [70, 85, 110],
-      align: col.label === 'DESCRIPTION / SERVICE' ? 'left' : 'right',
-    });
-  }
 
+  const ITEM_BOTTOM = 660;
+  const CONTINUATION_TOP = 130;
+
+  const drawTableHeader = (top: number) => {
+    doc.setFillColor(240, 245, 252);
+    doc.rect(margin, top - 13, contentWidth, 20, 'F');
+    for (const col of cols) {
+      textY(col.label, col.x + (col.label === 'DESCRIPTION / SERVICE' ? 0 : 12), top, {
+        size: 7.5,
+        bold: true,
+        color: [70, 85, 110],
+        align: col.label === 'DESCRIPTION / SERVICE' ? 'left' : 'right',
+      });
+    }
+  };
+  drawTableHeader(y);
+
+  // Money columns arrive as Prisma Decimal objects; coerced to numbers here so jsPDF never has to
+  // format a Decimal.js instance (whose valueOf() is a string).
   const rows: Array<{ description: string; quantity: number; unitPrice: number; amount: number }> =
     items.length > 0
       ? items.map((item) => ({
           description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          amount: item.amount,
+          quantity: toNumber(item.quantity),
+          unitPrice: toNumber(item.unitPrice),
+          amount: toNumber(item.amount),
         }))
       : [
           {
             description: `Air Ticket: ${fromDisplay} → ${toDisplay} (${booking.airline})`,
             quantity: 1,
-            unitPrice: booking.baseFare ?? booking.amount ?? 0,
-            amount: booking.baseFare ?? booking.amount ?? 0,
+            unitPrice: toNumber(booking.baseFare ?? booking.amount),
+            amount: toNumber(booking.baseFare ?? booking.amount),
           },
         ];
 
   let rowY = y + 18;
+  // Long invoices used to be silently truncated: every item past rowY > 660 was skipped with
+  // no page break and no warning, so a 30-line invoice printed as a 26-line invoice with the
+  // totals still adding up to the full amount. Items now flow onto continuation pages.
   rows.forEach((item, index) => {
-    if (rowY > 660) return;
+    if (rowY > ITEM_BOTTOM) {
+      doc.addPage();
+      rowY = CONTINUATION_TOP + 18;
+      drawTableHeader(CONTINUATION_TOP);
+      textY(`Invoice # ${booking.invoiceNumber || '—'} (continued)`, pageWidth - margin, CONTINUATION_TOP - 30, {
+        size: 8,
+        align: 'right',
+        color: [120, 128, 140],
+      });
+    }
     textY(item.description, margin, rowY, { size: 9 });
     textY(String(item.quantity), cols[1].x + 12, rowY, { size: 9, align: 'right' });
     textY(fmt(item.unitPrice, currency), cols[2].x + 12, rowY, { size: 9, align: 'right' });
@@ -277,6 +300,13 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
   });
 
   // ----- Totals -----
+  // The totals block plus the payment-status box needs roughly 200pt. If the last item page
+  // cannot fit it, break to a fresh page rather than overlapping the bank/terms/footer block.
+  const TOTALS_REQUIRED_SPACE = 210;
+  if (rowY + TOTALS_REQUIRED_SPACE > 720) {
+    doc.addPage();
+    rowY = 130;
+  }
   let totalsY = Math.min(Math.max(rowY + 10, 300), 610);
   const taxLabel = (setting?.taxLabel || 'GST').toUpperCase();
   const totalRows: Array<[string, string]> = [
@@ -285,8 +315,12 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
   if (discount > 0) {
     totalRows.push(['Discount', `- ${fmt(discount, currency)}`]);
   }
-  if (taxAmount > 0 || setting?.gstRate) {
-    totalRows.push([`Tax (${taxLabel})`, fmt(taxAmount, currency)]);
+  const taxRate = toNumber(booking.taxRate) > 0
+    ? toNumber(booking.taxRate)
+    : (toNumber(setting?.gstRate) > 0 ? toNumber(setting.gstRate) : 0);
+  if (taxAmount > 0 || taxRate > 0) {
+    const rateText = taxRate > 0 ? ` @ ${taxRate}%` : '';
+    totalRows.push([`Tax (${taxLabel}${rateText})`, fmt(taxAmount, currency)]);
   }
 
   for (const [label, value] of totalRows) {
@@ -325,14 +359,14 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
     setting?.bankName || setting?.bankAccountNumber || setting?.bankUpiId || setting?.bankIfscSwift,
   );
   if (hasBankDetails) {
-    let bY = totalsY + 18;
+    const bY = totalsY + 18;
     doc.setFillColor(247, 250, 254);
     doc.setDrawColor(220, 232, 245);
     doc.roundedRect(margin, bY, contentWidth, 54, 3, 3, 'FD');
 
     textY('BANK PAYMENT INSTRUCTIONS', margin + 10, bY + 12, { size: 7.5, bold: true, color: [14, 42, 92] });
 
-    let bLineY = bY + 26;
+    const bLineY = bY + 26;
     if (setting?.bankName) {
       textY(`Bank: ${toLatin1(setting.bankName)}`, margin + 10, bLineY, { size: 8 });
     }

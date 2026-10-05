@@ -11,6 +11,13 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { FormEvent } from "react";
+import { formatPhoneDisplay } from "@/lib/phone-utils";
+import {
+  getStoredStaff,
+  getStoredStaffBookings,
+  type StaffMember,
+  type StaffBookingItem,
+} from "@/lib/staff-management";
 
 interface BookingStats {
   total: number;
@@ -44,6 +51,10 @@ interface BookingDetail {
   source: string | null;
   version: number;
   lastEditor: { name: string } | null;
+  createdBy?: string | null;
+  creatorName?: string | null;
+  creatorEmail?: string | null;
+  creatorRole?: string | null;
   createdAt: string;
   updatedAt: string;
   customer: { id: string; name: string; phone: string; email: string | null } | null;
@@ -80,6 +91,9 @@ function BookingsPageInner() {
   const [status, setStatus] = useState(initial.status);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [airline, setAirline] = useState("");
+  const [staffFilter, setStaffFilter] = useState("");
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const [staffBookings, setStaffBookings] = useState<StaffBookingItem[]>([]);
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [limit, setLimit] = useState(8);
@@ -91,6 +105,25 @@ function BookingsPageInner() {
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [toast, setToast] = useState("");
   const [actionError, setActionError] = useState("");
+
+  // The filter state used to be seeded from `initial` via useState initialisers only, which run
+  // once. In-app navigation to /bookings?search=… (GlobalSearch, customer drill-down, table
+  // links) does not remount the page, so the new params were silently ignored while the search
+  // box kept showing the previous term. Re-sync whenever the URL actually changes, but leave the
+  // user's own edits alone when they have already interacted.
+  const filterKeys = `${initial.search}|${initial.status}|${initial.customerId}|${initial.from}|${initial.to}`;
+  const lastSyncedFilter = useRef(filterKeys);
+  useEffect(() => {
+    if (lastSyncedFilter.current === filterKeys) return;
+    lastSyncedFilter.current = filterKeys;
+    setSearch(initial.search);
+    setQuery(initial.search);
+    setStatus(initial.status);
+    setCustomerId(initial.customerId);
+    setFrom(initial.from);
+    setTo(initial.to);
+    setPage(1);
+  }, [filterKeys, initial.search, initial.status, initial.customerId, initial.from, initial.to]);
   const [dense, setDense] = useState(false);
 
   useEffect(() => {
@@ -142,12 +175,53 @@ function BookingsPageInner() {
     return () => clearTimeout(timer);
   }, [listFingerprint]);
 
+  useEffect(() => {
+    const refreshStaff = () => {
+      setStaffMembers(getStoredStaff());
+      setStaffBookings(getStoredStaffBookings());
+    };
+    refreshStaff();
+    window.addEventListener("fc:staff-updated", refreshStaff);
+    return () => {
+      window.removeEventListener("fc:staff-updated", refreshStaff);
+    };
+  }, []);
+
+  const enrichedRows = useMemo(() => {
+    const apiItems = list.data?.items ?? [];
+    const byId = new Map<string, StaffBookingItem>();
+    const byPnr = new Map<string, StaffBookingItem>();
+    for (const sb of staffBookings) {
+      byId.set(sb.id, sb);
+      byPnr.set(sb.pnr.toUpperCase(), sb);
+    }
+    const merged: ApiBookingRow[] = apiItems.map((row) => {
+      const matched = byId.get(row.id) || byPnr.get((row.pnr || "").toUpperCase());
+      return {
+        ...row,
+        createdBy: row.createdBy || matched?.staffId || null,
+        creatorName: row.creatorName || matched?.staffName || "Garv Kataria",
+        creatorEmail: row.creatorEmail || matched?.staffEmail || null,
+        creatorRole: row.creatorRole || matched?.staffRole || "SUPER_ADMIN",
+      };
+    });
+
+    if (!staffFilter) return merged;
+    return merged.filter(
+      (r) =>
+        r.createdBy === staffFilter ||
+        (r.creatorEmail && r.creatorEmail.toLowerCase() === staffFilter.toLowerCase()) ||
+        (r.creatorName && r.creatorName.toLowerCase() === staffFilter.toLowerCase()),
+    );
+  }, [list.data?.items, staffBookings, staffFilter]);
+
   function resetFilters() {
     setSearch("");
     setQuery("");
     setStatus("");
     setCustomerId("");
     setAirline("");
+    setStaffFilter("");
     setFrom("");
     setTo("");
     setPage(1);
@@ -179,7 +253,7 @@ function BookingsPageInner() {
     exportParams.set("limit", "1000");
     try {
       const result = await api<BookingList>(`/bookings?${exportParams.toString()}`);
-      const header = ["PNR", "Customer", "Phone", "Flight", "Airline", "Route", "Departure Date", "Departure Time", "Status", "Amount"];
+      const header = ["PNR", "Customer", "Phone", "Flight", "Airline", "Route", "Departure Date", "Departure Time", "Status", "Amount", "Booked By"];
       const rows = result.items.map((booking) => [
         booking.pnr,
         booking.customerName,
@@ -191,6 +265,7 @@ function BookingsPageInner() {
         booking.departureTime,
         booking.status,
         booking.amount,
+        booking.creatorName || "Garv Kataria",
       ].map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(","));
       const csv = "\uFEFF" + [header.join(","), ...rows].join("\r\n");
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -244,8 +319,32 @@ function BookingsPageInner() {
           onTo={(value) => { setTo(value); setPage(1); }}
           onReset={resetFilters}
         />
-        <div className="flex items-center justify-between px-1 pb-1">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Flight Records</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Flight Records</span>
+            <select
+              value={staffFilter}
+              onChange={(e) => setStaffFilter(e.target.value)}
+              aria-label="Filter by staff member who booked"
+              className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 outline-none focus:border-blue-500"
+            >
+              <option value="">All Staff / Booked By Anyone</option>
+              {staffMembers.map((member) => (
+                <option key={member.id} value={member.name}>
+                  Booked by: {member.name} ({member.role.replace("_", " ")} · {member.totalBookings} bookings)
+                </option>
+              ))}
+            </select>
+            {staffFilter && (
+              <button
+                type="button"
+                onClick={() => setStaffFilter("")}
+                className="rounded-md bg-blue-50 px-2 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100"
+              >
+                Showing: {staffFilter} ×
+              </button>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => setDense((d) => !d)}
@@ -259,7 +358,7 @@ function BookingsPageInner() {
           </button>
         </div>
         <section className="overflow-hidden rounded-xl border border-[#dce7f4] bg-white shadow-[0_10px_24px_rgba(31,61,105,0.04)]">
-          <BookingsTable dense={dense} highlightedIds={liveHighlights} rows={list.data?.items ?? []} onView={(id) => setViewId(id)} onCancel={(id) => setCancelId(id)} onEdit={(id) => setEditId(id)} />
+          <BookingsTable dense={dense} highlightedIds={liveHighlights} rows={enrichedRows} onView={(id) => setViewId(id)} onCancel={(id) => setCancelId(id)} onEdit={(id) => setEditId(id)} />
           <Pagination total={list.data?.meta.total} page={list.data?.meta.page ?? 1} limit={limit} onPageChange={(p) => setPage(p)} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
         </section>
       </div>
@@ -292,7 +391,7 @@ function BookingDetailModal({ id, data, loading, onClose, onEdit, onReschedule }
           <div className="space-y-5 px-5 py-5">
             <div className="flex items-center gap-4 rounded-xl bg-[#f4f8fd] p-4">
               <span className="grid h-12 w-12 place-items-center rounded-full bg-blue-100 font-bold text-blue-700">{initialsOf(booking.customer?.name ?? "?")}</span>
-              <div className="min-w-0 flex-1"><div className="font-bold">{booking.customer?.name ?? "—"}</div><div className="text-sm text-[#596782]">{booking.customer?.phone ?? "—"}</div></div>
+              <div className="min-w-0 flex-1"><div className="font-bold">{booking.customer?.name ?? "—"}</div><div className="text-sm text-[#596782]">{formatPhoneDisplay(booking.customer?.phone)}</div></div>
               <div className="text-right"><div className="text-sm font-bold text-[#071333]">{formatCurrency(booking.amount, booking.currency)}</div><div className="text-xs text-[#596782]">{booking.source ?? ""}</div></div>
             </div>
             <div className="flex items-center justify-between gap-3 rounded-xl border border-[#dce7f4] p-4">
@@ -305,8 +404,8 @@ function BookingDetailModal({ id, data, loading, onClose, onEdit, onReschedule }
               {detailRow("Departure", `${booking.departureDate ? formatDate(booking.departureDate) : "—"}${booking.departureTime ? ` · ${booking.departureTime}` : ""}`)}
               {detailRow("Reference", booking.referenceNumber ?? "—")}
               {detailRow("Status", booking.status.replace(/_/g, " "))}
+              {detailRow("Booked By (Staff)", `${booking.creatorName ?? "Garv Kataria"}${booking.creatorRole ? ` (${booking.creatorRole.replace(/_/g, " ")})` : ""}`)}
               {detailRow("Created", booking.createdAt ? formatDate(booking.createdAt) : "—")}
-              {detailRow("Last updated", booking.updatedAt ? formatDate(booking.updatedAt) : "—")}
             </div>
           </div>
         )}

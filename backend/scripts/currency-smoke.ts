@@ -1,8 +1,11 @@
 import { ConfigService } from '@nestjs/config';
-import { CurrencyService } from './currency.service';
+import { CurrencyService, type CurrencyMeta } from '../src/currency/currency.service';
 
 /** Live smoke test against the real upstreams - not part of `npm test`. Run with:
- *  npx ts-node -r tsconfig-paths/register src/currency/smoke.ts
+ *  npm run smoke:currency
+ *
+ *  Lives in scripts/ rather than src/ so it is not compiled into dist/ and shipped in the
+ *  production Docker image.
  */
 async function main() {
   const config = {
@@ -35,8 +38,10 @@ async function main() {
   console.log(`  50,000 INR -> AED  ${cross.result.toFixed(2)}  (${service.format(cross.result, 'AED')})`);
 
   const list = await service.list();
-  console.log('list size:', list.currencies.length, '| first 5:', list.currencies.slice(0, 5).map((c) => `${c.code}:${c.name}`).join(', '));
-  console.log('INR meta :', JSON.stringify(list.currencies.find((c) => c.code === 'INR')));
+  const first5 = list.currencies.slice(0, 5).map((c: CurrencyMeta) => `${c.code}:${c.name}`).join(', ');
+  console.log('list size:', list.currencies.length, '| first 5:', first5);
+  const inr = list.currencies.find((c: CurrencyMeta) => c.code === 'INR');
+  console.log('INR meta :', JSON.stringify(inr));
 }
 
 main().catch((err) => {

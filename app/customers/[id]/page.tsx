@@ -10,6 +10,8 @@ import { api, formatCurrency, formatDate, statusTone } from "@/lib/api";
 import { useDisplayCurrency } from "@/lib/currency";
 import { Ban, CalendarDays, Edit, Mail, MessageCircle, Phone, Plane, PlaneLanding, PlaneTakeoff, Plus, Star, X } from "lucide-react";
 import { FormEvent, useState } from "react";
+import { PhoneInput } from "@/components/ui/phone-input";
+import { formatPhoneDisplay, parsePhoneNumber, validatePhoneNumber } from "@/lib/phone-utils";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -124,7 +126,7 @@ export default function CustomerDetailPage() {
             <div>
               <h1 className="text-[28px] font-extrabold">{customer ? customer.name : "—"} <span className={`ml-2 rounded-md px-3 py-1 text-sm ${active ? "bg-[#d9f7e8] text-[#00a451]" : "bg-[#ffe2eb] text-[#f22552]"}`}>{active ? "Active" : "Inactive"}</span></h1>
               <div className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">
-                <span><Phone className="mr-2 inline h-4 w-4" />+91 {customer?.phone ?? "—"}</span>
+                <span><Phone className="mr-2 inline h-4 w-4" />{formatPhoneDisplay(customer?.phone)}</span>
                 <span><Mail className="mr-2 inline h-4 w-4" />{customer?.email ?? "—"}</span>
                 <span><CalendarDays className="mr-2 inline h-4 w-4" />Member since {customer ? formatDate(customer.createdAt) : "—"}</span>
               </div>
@@ -180,7 +182,7 @@ export default function CustomerDetailPage() {
             )}
           </div>
           <aside className="space-y-4">
-            <Box title="Customer Details" items={[`Full Name|${customer?.name ?? "—"}`, `Phone|+91 ${customer?.phone ?? "—"}`, `Email|${customer?.email ?? "—"}`, `Status|${active ? "Active" : "Inactive"}`, `Member Since|${customer ? formatDate(customer.createdAt) : "—"}`]} />
+            <Box title="Customer Details" items={[`Full Name|${customer?.name ?? "—"}`, `Phone|${formatPhoneDisplay(customer?.phone)}`, `Email|${customer?.email ?? "—"}`, `Status|${active ? "Active" : "Inactive"}`, `Member Since|${customer ? formatDate(customer.createdAt) : "—"}`]} />
             <Box title="Quick Actions" items={[]}>
               <div className="mt-1 space-y-2">
                 <Link href="/bookings/add" className="flex items-center gap-2 rounded-lg bg-[#1688f9] px-4 py-2.5 text-sm font-bold text-white"><Plus className="h-4 w-4" /> New Booking</Link>
@@ -228,7 +230,13 @@ function EditCustomerModal({ customer, onClose, onSaved }: { customer: CustomerD
     event.preventDefault();
     const errs: Record<string, string> = {};
     if (!form.name.trim()) errs.name = "Name is required.";
-    if (!/^\d{10}$/.test(form.phone.replace(/\D/g, ""))) errs.phone = "Enter a valid 10-digit phone number.";
+    const parsed = parsePhoneNumber(form.phone);
+    const phoneVal = validatePhoneNumber(parsed.country.iso, parsed.nationalNumber);
+    if (!form.phone.trim()) {
+      errs.phone = "Phone number is required.";
+    } else if (!phoneVal.isValid) {
+      errs.phone = phoneVal.error || "Enter a valid phone number.";
+    }
     if (form.email && !EMAIL_RE.test(form.email.trim())) errs.email = "Enter a valid email address.";
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
@@ -251,9 +259,24 @@ function EditCustomerModal({ customer, onClose, onSaved }: { customer: CustomerD
           <EditField label="Full Name" required error={errors.name}>
             <input value={form.name} onChange={(e) => { setForm((f) => ({ ...f, name: e.target.value })); setErrors((er) => { const n = { ...er }; delete n.name; return n; }); }} className="h-11 w-full rounded-md border border-[#cfdbea] px-3 text-sm outline-none focus:border-[#1688f9]" />
           </EditField>
-          <EditField label="Phone" required error={errors.phone}>
-            <input value={form.phone} onChange={(e) => { setForm((f) => ({ ...f, phone: e.target.value })); setErrors((er) => { const n = { ...er }; delete n.phone; return n; }); }} className="h-11 w-full rounded-md border border-[#cfdbea] px-3 text-sm outline-none focus:border-[#1688f9]" />
-          </EditField>
+          <div>
+            <label className="mb-2 block text-sm font-semibold">
+              Phone Number <span className="text-red-500">*</span>
+            </label>
+            <PhoneInput
+              value={form.phone}
+              error={errors.phone}
+              onChange={(e164, isValid, err) => {
+                setForm((f) => ({ ...f, phone: e164 }));
+                setErrors((er) => {
+                  const n = { ...er };
+                  if (isValid) delete n.phone;
+                  else if (err) n.phone = err;
+                  return n;
+                });
+              }}
+            />
+          </div>
           <EditField label="Email" required={false} error={errors.email}>
             <input value={form.email} onChange={(e) => { setForm((f) => ({ ...f, email: e.target.value })); setErrors((er) => { const n = { ...er }; delete n.email; return n; }); }} className="h-11 w-full rounded-md border border-[#cfdbea] px-3 text-sm outline-none focus:border-[#1688f9]" />
           </EditField>

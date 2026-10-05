@@ -23,6 +23,11 @@ export function useApi<T>(path: string | null, options: UseApiOptions = {}) {
   const isQuery = method === "GET";
   const bodyKey = JSON.stringify(body ?? null);
 
+  // The body is held in a ref so `refetch` depends on the serialized form (which is what actually
+  // determines the request) rather than on an object identity that is new on every render.
+  const bodyRef = useRef(body);
+  bodyRef.current = body;
+
   const [data, setData] = useState<T | null>(() => (path && isQuery ? getCachedGet<T>(path) : null));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +57,7 @@ export function useApi<T>(path: string | null, options: UseApiOptions = {}) {
     }
 
     try {
-      const result = await api<T>(path, { method, body, auth: true });
+      const result = await api<T>(path, { method, body: bodyRef.current, auth: true });
       if (runId.current !== id) return;
       setData(result);
       hasData.current = true;
@@ -72,6 +77,10 @@ export function useApi<T>(path: string | null, options: UseApiOptions = {}) {
         setLoading(false);
       }
     }
+  // `bodyKey` is intentionally the dependency rather than the ref: a ref does not trigger
+  // re-creation of the callback, so the effect below would never re-run when the request body
+  // changes. The ref exists only to avoid re-subscribing on body *identity*.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, method, isQuery, bodyKey]);
 
   refetchRef.current = refetch;
@@ -105,10 +114,11 @@ export function useApi<T>(path: string | null, options: UseApiOptions = {}) {
     };
   }, [path, isQuery]);
 
-  // Fast adaptive polling fallback: 4s when tab is active & focused, refetchInterval otherwise.
+  // Adaptive polling fallback: only poll when refetchInterval is not explicitly 0
   useEffect(() => {
     if (!path || !isQuery) return;
-    const interval = refetchInterval ? Math.min(refetchInterval, 4000) : 5000;
+    if (refetchInterval === 0) return;
+    const interval = typeof refetchInterval === "number" && refetchInterval > 0 ? refetchInterval : 5000;
     const id = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
       refetchRef.current();

@@ -1,18 +1,31 @@
+# Local/VM stack for FlyConnect.
+#
+# Run with the backend env file supplying the secrets:
+#   docker compose --env-file backend/.env up -d
+# (deploy-vm.sh does this for you.)
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: flyconnect-postgres
     restart: unless-stopped
+    # Credentials come from the environment, never from this tracked file. The :? guard makes
+    # compose refuse to start rather than silently fall back to a guessable password.
     environment:
-      POSTGRES_USER: flyconnect
-      POSTGRES_PASSWORD: flyconnect
-      POSTGRES_DB: flyconnect
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-flyconnect}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — use --env-file backend/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-flyconnect}
+    # Deliberately NOT published to the host. The previous "5432:5432" bound a database with a
+    # hardcoded password to 0.0.0.0; reachability depended entirely on an external firewall rule.
+    # Only the backend container needs it, and it is on the same network.
+    expose:
+      - "5432"
+    networks:
+      - backend
     volumes:
       - flyconnect_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U flyconnect -d flyconnect"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-flyconnect} -d ${POSTGRES_DB:-flyconnect}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -21,16 +34,28 @@ services:
     image: redis:7-alpine
     container_name: flyconnect-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "6379:6379"
+    # requirepass is mandatory. An unauthenticated Redis on a published port means anyone can
+    # read and rewrite the entire job queue, rate-limit counters and automation state.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD must be set — use --env-file backend/.env}
+    # Not published to the host, for the same reason as Postgres.
+    expose:
+      - "6379"
+    networks:
+      - backend
     volumes:
       - flyconnect_redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping"]
       interval: 5s
       timeout: 5s
       retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set — use --env-file backend/.env}
 
   backend:
     build:
@@ -45,22 +70,60 @@ services:
         condition: service_healthy
     env_file:
       - ./backend/.env
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    # Bound to loopback: the reverse proxy terminates TLS, the API is not directly exposed.
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
+    networks:
+      - backend
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   frontend:
     build:
       context: .
       dockerfile: Dockerfile
+      # NEXT_PUBLIC_* values are inlined into the client bundle at BUILD time, so they must be
+      # passed as build args here. Setting them under `environment:` below (as this file used
+      # to) has no effect on the already-baked bundle and silently shipped the hardcoded
+      # fallback host instead.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL must be set}
+        NEXT_PUBLIC_FALLBACK_API_URL: ${NEXT_PUBLIC_FALLBACK_API_URL:-}
+        NEXT_PUBLIC_FIREBASE_API_KEY: ${NEXT_PUBLIC_FIREBASE_API_KEY:-}
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-}
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-}
+        NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:-}
+        NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:-}
+        NEXT_PUBLIC_FIREBASE_APP_ID: ${NEXT_PUBLIC_FIREBASE_APP_ID:-}
     container_name: flyconnect-frontend
     restart: unless-stopped
     depends_on:
-      - backend
-    environment:
-      - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=http://localhost:4000/api
+      backend:
+        condition: service_started
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  # Datastores live on an internal-only bridge: only the backend is attached, so the frontend
+  # has no network path to Postgres or Redis at all.
+  backend:
+    internal: true
+  edge: {}
 
 volumes:
   flyconnect_pgdata:

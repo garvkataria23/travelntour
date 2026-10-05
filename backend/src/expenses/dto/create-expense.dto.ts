@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 import { ExpenseCategory } from '@prisma/client';
@@ -28,6 +29,7 @@ export class CreateExpenseDto {
 
   @Type(() => Number)
   @IsNumber({}, { message: 'Amount must be a number' })
+  @Min(0.01, { message: 'Amount must be greater than 0' })
   amount: number;
 
   @IsOptional()

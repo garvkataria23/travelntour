@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsISO8601, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsISO8601, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-validator';
 import { IncomeCategory } from '@prisma/client';
 
 export class CreateIncomeDto {
@@ -14,6 +14,7 @@ export class CreateIncomeDto {
 
   @Type(() => Number)
   @IsNumber({}, { message: 'Amount must be a number' })
+  @Min(0.01, { message: 'Amount must be greater than 0' })
   amount: number;
 
   @IsOptional()

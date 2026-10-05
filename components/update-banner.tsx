@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles, RefreshCw, X } from "lucide-react";
 
 export function UpdateBanner() {
   const [initialDeploymentId, setInitialDeploymentId] = useState<string | null>(null);
+  const initialDeploymentIdRef = useRef<string | null>(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -24,17 +25,12 @@ export function UpdateBanner() {
 
         if (!serverId || !isMounted) return;
 
-        setInitialDeploymentId((prev) => {
-          if (!prev) {
-            // First run, save initial deployment ID
-            return serverId;
-          }
-          if (prev !== serverId) {
-            // Server deployment changed! Show update button
-            setUpdateAvailable(true);
-          }
-          return prev;
-        });
+        if (!initialDeploymentIdRef.current) {
+          initialDeploymentIdRef.current = serverId;
+          setInitialDeploymentId(serverId);
+        } else if (initialDeploymentIdRef.current !== serverId) {
+          setUpdateAvailable(true);
+        }
       } catch {
         // Silently ignore network failure / offline
       }

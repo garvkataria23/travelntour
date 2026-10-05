@@ -1,4 +1,3 @@
-import { Type } from 'class-transformer';
 import {
   IsEmail,
   IsIn,
@@ -24,9 +23,10 @@ export class CreateUserDto {
 
   @IsString()
   @MinLength(6, { message: 'Password must be at least 6 characters' })
+  @MaxLength(128, { message: 'Password must not exceed 128 characters' })
   password: string;
 
   @IsOptional()
-  @IsIn([Role.ADMIN, Role.STAFF])
+  @IsIn([Role.ADMIN, Role.MANAGER, Role.STAFF])
   role?: Role;
 }

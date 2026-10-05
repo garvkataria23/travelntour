@@ -1,11 +1,13 @@
 import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Public } from '../common/public.decorator';
 import { CurrencyService } from './currency.service';
 
 const CURRENCY_CODE = /^[A-Z]{2,5}$/;
 
 @ApiTags('currency')
 @ApiBearerAuth()
+@Public()
 @Controller('currency')
 export class CurrencyController {
   constructor(private readonly currency: CurrencyService) {}

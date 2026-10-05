@@ -1,193 +1,164 @@
 "use client";
 
-import { upgradeWhatsAppLimit } from "./whatsapp-quota";
+import { api, ApiError } from "@/lib/api";
+
+/**
+ * Platform-owner tenant administration.
+ *
+ * SECURITY HISTORY — read before changing anything here.
+ *
+ * This module used to be the single source of truth for tenant blocking, WhatsApp ceilings,
+ * account CRUD and the master-admin roster, all persisted in localStorage under
+ * "fc_master_admin_accounts_v1". That was not an access control:
+ *
+ *   - Blocking a tenant only locked the browser that did it. Every other session, and the API
+ *     itself, carried on serving the tenant normally.
+ *   - Any user could open DevTools and run `localStorage.removeItem("fc_master_admin_accounts_v1")`
+ *     to clear their own block, or edit the stored role to reach /admin.
+ *   - A tenant-level ADMIN (not just the platform owner) was shown the quota "upgrade" controls,
+ *     so any tenant admin could grant themselves unlimited WhatsApp quota.
+ *   - Five fabricated tenants with realistic-looking names, emails and phone numbers were seeded
+ *     into every visitor's browser on first read.
+ *
+ * All of it now lives server-side behind SUPER_ADMIN (see backend/src/platform). This module is a
+ * thin API client plus a read-through cache so that synchronous UI code keeps working; the cache
+ * is a cache only and is never the thing that enforces a decision.
+ *
+ * The blocking check a tenant's own browser performs (`isAccountBlocked`) is therefore cosmetic and
+ * is only used to render a notice. Real enforcement is Business.status, which
+ * AuthService.issueSession checks before minting a session and PlatformService revokes existing
+ * refresh tokens when a tenant is blocked.
+ */
 
 export const MASTER_ADMIN_ID = "TRAVELNTOUR";
-export const MASTER_ADMIN_PASS = "GARV2331##";
 
-export function isMasterAdminCredentials(id: string, pass: string): boolean {
-  return id.trim().toUpperCase() === MASTER_ADMIN_ID && pass === MASTER_ADMIN_PASS;
-}
+/** Ceiling applied when a tenant has no explicit limit set. Mirrors PlatformService. */
+export const DEFAULT_WHATSAPP_LIMIT = 1000;
 
 export interface AdminAccount {
   id: string;
   name: string;
-  ownerName: string;
-  email: string;
-  phone: string;
-  plan: "ENTERPRISE" | "PROFESSIONAL" | "STARTER";
-  status: "ACTIVE" | "BLOCKED" | "SUSPENDED";
-  blockReason?: string;
-  blockedAt?: string;
-  blockedBy?: string;
+  /** Null until the tenant has an admin user provisioned. */
+  ownerName: string | null;
+  email: string | null;
+  phone: string | null;
+  plan: string;
+  status: "ACTIVE" | "BLOCKED" | "SUSPENDED" | "INACTIVE" | "PENDING";
+  blockReason?: string | null;
+  blockedAt?: string | null;
   whatsappLimit: number;
+  whatsappLimitIsDefault?: boolean;
   whatsappUsed: number;
   createdAt: string;
   lastActiveAt: string;
-  branchId?: string;
-  branchName?: string;
-  currency?: string;
   totalBookings?: number;
-  notes?: string;
+  timezone?: string;
+  currency?: string;
+  notes?: string | null;
+  /**
+   * Branch labels come from the browser-local CRM in lib/travel-crm.ts, not from the API. Kept on
+   * the type because the admin table renders it, but it is display-only.
+   */
+  branchName?: string;
 }
 
-const STORAGE_KEY = "fc_master_admin_accounts_v1";
+// ── Read-through cache ────────────────────────────────────────────────────────
+// Held in a module variable rather than localStorage: it must never survive a logout, and it must
+// never be the source of truth for an authorization decision.
 
-export const INITIAL_ACCOUNTS: AdminAccount[] = [
-  {
-    id: "biz_blueaura",
-    name: "Blue Aura Tours & Travels",
-    ownerName: "Garv Kataria",
-    email: "admin@blueauratravel.com",
-    phone: "+971 50 123 4567",
-    plan: "ENTERPRISE",
-    status: "ACTIVE",
-    whatsappLimit: 1000,
-    whatsappUsed: 142,
-    createdAt: "2026-01-15T08:00:00Z",
-    lastActiveAt: new Date().toISOString(),
-    totalBookings: 1240,
-    notes: "Primary flagship tenant for corporate & luxury B2B operations.",
-  },
-  {
-    id: "biz_demo",
-    name: "TravelHub Express (Standard Demo)",
-    ownerName: "Demo Agent",
-    email: "demo@flyconnect.app",
-    phone: "+91 98765 43210",
-    plan: "PROFESSIONAL",
-    status: "ACTIVE",
-    whatsappLimit: 1000,
-    whatsappUsed: 620,
-    createdAt: "2026-03-01T10:00:00Z",
-    lastActiveAt: new Date().toISOString(),
-    totalBookings: 310,
-    notes: "Default test environment for staff and trial evaluations.",
-  },
-  {
-    id: "biz_skyhigh",
-    name: "SkyHigh Luxury Holidays",
-    ownerName: "Rahul Mehra",
-    email: "rahul@skyhighholidays.com",
-    phone: "+91 98234 56789",
-    plan: "ENTERPRISE",
-    status: "ACTIVE",
-    whatsappLimit: 2500,
-    whatsappUsed: 1890,
-    createdAt: "2026-04-12T11:20:00Z",
-    lastActiveAt: new Date(Date.now() - 3600000).toISOString(),
-    totalBookings: 890,
-    notes: "High volume luxury holiday operator across Dubai, Bali & Europe.",
-  },
-  {
-    id: "biz_apex",
-    name: "Apex Corporate Travel Partners",
-    ownerName: "Priya Sharma",
-    email: "ops@apextravel.in",
-    phone: "+91 98111 22334",
-    plan: "ENTERPRISE",
-    status: "ACTIVE",
-    whatsappLimit: 5000,
-    whatsappUsed: 3200,
-    createdAt: "2026-05-19T09:15:00Z",
-    lastActiveAt: new Date(Date.now() - 7200000).toISOString(),
-    totalBookings: 1650,
-    notes: "Corporate accounts manager for 18 MNC clients in India & UAE.",
-  },
-  {
-    id: "biz_wanderlust",
-    name: "Wanderlust Expeditions",
-    ownerName: "Aman Verma",
-    email: "aman@wanderlust.co",
-    phone: "+91 97777 88899",
-    plan: "STARTER",
-    status: "BLOCKED",
-    blockReason: "Repeated non-payment & sending unauthorized unsolicited WhatsApp messages",
-    blockedAt: "2026-09-28T14:30:00Z",
-    blockedBy: "Garv Kataria (Master Admin)",
-    whatsappLimit: 500,
-    whatsappUsed: 500,
-    createdAt: "2026-07-01T15:00:00Z",
-    lastActiveAt: "2026-09-28T14:28:00Z",
-    totalBookings: 45,
-    notes: "Blocked due to policy violations and overdue invoice #INV-2026-099.",
-  },
-];
+let cache: AdminAccount[] | null = null;
+const listeners = new Set<(accounts: AdminAccount[]) => void>();
 
-export function getAdminAccounts(): AdminAccount[] {
-  if (typeof window === "undefined") return INITIAL_ACCOUNTS;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_ACCOUNTS));
-      return INITIAL_ACCOUNTS;
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      return INITIAL_ACCOUNTS;
-    }
-    return parsed;
-  } catch {
-    return INITIAL_ACCOUNTS;
-  }
+function emit(): void {
+  for (const listener of listeners) listener(cache ?? []);
 }
 
-export function saveAdminAccounts(accounts: AdminAccount[]): void {
+export function subscribeToAdminAccounts(listener: (accounts: AdminAccount[]) => void): () => void {
+  listeners.add(listener);
+  listener(cache ?? []);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function assertSuperAdmin(): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts));
-    window.dispatchEvent(new CustomEvent("fc:admin-accounts-updated", { detail: accounts }));
+    const raw = window.localStorage.getItem("fc_user");
+    const user = raw ? (JSON.parse(raw) as { role?: string }) : null;
+    if (user?.role !== "SUPER_ADMIN") {
+      throw new ApiError(403, "SUPER_ADMIN_REQUIRED", "This action requires the master admin role");
+    }
   } catch (err) {
-    console.error("Failed to save admin accounts:", err);
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(403, "SUPER_ADMIN_REQUIRED", "This action requires the master admin role");
   }
+}
+
+/** Last known roster, without a network call. Empty until `fetchAdminAccounts` resolves. */
+export function getAdminAccounts(): AdminAccount[] {
+  return cache ?? [];
+}
+
+/** Drops the cache. Call on logout so one super admin cannot see another's roster. */
+export function invalidateAdminAccounts(): void {
+  cache = null;
+  emit();
+}
+
+/** Fetches the tenant roster from the API and refreshes the cache. */
+export async function fetchAdminAccounts(opts: { search?: string; status?: string } = {}): Promise<AdminAccount[]> {
+  assertSuperAdmin();
+  const params = new URLSearchParams();
+  if (opts.search?.trim()) params.set("search", opts.search.trim());
+  if (opts.status && opts.status !== "ALL") params.set("status", opts.status);
+
+  const result = await api<{ items: AdminAccount[] }>(`/platform/tenants?${params.toString()}`, {
+    skipCache: true,
+  });
+  cache = result.items ?? [];
+  emit();
+  return cache;
 }
 
 /**
- * 1-Click Block / Unblock / Suspend Toggle
+ * 1-Click Block / Unblock / Suspend Toggle. Server-enforced.
  */
-export function toggleAccountStatus(
+export async function toggleAccountStatus(
   accountId: string,
   newStatus: "ACTIVE" | "BLOCKED" | "SUSPENDED",
   reason = "",
-  adminName = "Garv Kataria (Master Admin)"
-): AdminAccount {
-  const accounts = getAdminAccounts();
-  const index = accounts.findIndex((a) => a.id === accountId);
-  if (index === -1) {
-    throw new Error(`Account with ID "${accountId}" not found.`);
-  }
+  adminName = "Master Admin"
+): Promise<AdminAccount> {
+  assertSuperAdmin();
+  const blocked = newStatus !== "ACTIVE";
 
-  const existing = accounts[index];
-  const updated: AdminAccount = {
-    ...existing,
-    status: newStatus,
-    blockReason: newStatus !== "ACTIVE" ? (reason || "Account access restricted by Master Admin") : undefined,
-    blockedAt: newStatus !== "ACTIVE" ? new Date().toISOString() : undefined,
-    blockedBy: newStatus !== "ACTIVE" ? adminName : undefined,
-  };
+  await api<{ id: string; status: string }>(`/platform/tenants/${accountId}/status`, {
+    method: "PATCH",
+    body: { blocked, ...(reason ? { reason } : {}) },
+  });
 
-  accounts[index] = updated;
-  saveAdminAccounts(accounts);
+  const accounts = await fetchAdminAccounts();
 
-  // Dispatch real-time event for immediate lockout in AppShell
+  // Broadcast so an open AppShell can react immediately. The server response remains the
+  // authority; this only saves a poll.
   if (typeof window !== "undefined") {
+    const account = accounts.find((a) => a.id === accountId) ?? null;
     window.dispatchEvent(
       new CustomEvent("fc:account-status-changed", {
-        detail: {
-          accountId,
-          status: newStatus,
-          reason: updated.blockReason,
-          account: updated,
-        },
-      })
+        detail: { accountId, status: newStatus, reason: account?.blockReason ?? reason, account },
+      }),
     );
   }
-
-  return updated;
+  void adminName;
+  return accounts.find((a) => a.id === accountId) as AdminAccount;
 }
 
 /**
- * Checks if a specific businessId is blocked
+ * Checks whether a tenant is blocked.
+ *
+ * This is a UI convenience only — it reflects what the API last reported. It cannot and does not
+ * grant access: an unblocked local cache has no effect on what the API will accept.
  */
 export function isAccountBlocked(businessId?: string | null): {
   isBlocked: boolean;
@@ -198,104 +169,73 @@ export function isAccountBlocked(businessId?: string | null): {
   if (!businessId) {
     return { isBlocked: false, isSuspended: false };
   }
-  const accounts = getAdminAccounts();
-  const found = accounts.find((a) => a.id === businessId || a.id.toLowerCase() === businessId.toLowerCase());
+  const found = cache?.find((a) => a.id === businessId);
   if (!found) {
     return { isBlocked: false, isSuspended: false };
   }
   return {
     isBlocked: found.status === "BLOCKED",
     isSuspended: found.status === "SUSPENDED",
-    reason: found.blockReason,
+    reason: found.blockReason ?? undefined,
     account: found,
   };
 }
 
-/**
- * Master Admin: Set WhatsApp limit for a specific account
- */
-export function updateAccountWhatsAppLimit(
+/** Master Admin: set a tenant's monthly WhatsApp message ceiling. Server-enforced. */
+export async function updateAccountWhatsAppLimit(
   accountId: string,
-  newLimit: number,
-  adminName = "Garv Kataria (Master Admin)"
-): AdminAccount {
-  const accounts = getAdminAccounts();
-  const index = accounts.findIndex((a) => a.id === accountId);
-  if (index === -1) {
-    throw new Error(`Account "${accountId}" not found.`);
-  }
-
-  const safeLimit = Math.max(10, Math.round(newLimit));
-  const updated: AdminAccount = {
-    ...accounts[index],
-    whatsappLimit: safeLimit,
-  };
-
-  accounts[index] = updated;
-  saveAdminAccounts(accounts);
-
-  // If this account is the active demo or current business, also sync the global whatsapp quota
-  if (typeof window !== "undefined") {
-    const currentBiz = window.localStorage.getItem("fc_business_id") || "biz_demo";
-    if (accountId === currentBiz || accountId === "biz_demo") {
-      upgradeWhatsAppLimit(safeLimit, adminName, `Limit adjusted in Admin Panel for ${updated.name}`);
-    }
-  }
-
-  return updated;
+  newLimit: number
+): Promise<AdminAccount> {
+  assertSuperAdmin();
+  await api<{ id: string; whatsappMonthlyLimit: number }>(`/platform/tenants/${accountId}/whatsapp-limit`, {
+    method: "PATCH",
+    body: { limit: Math.max(0, Math.round(newLimit)) },
+  });
+  const accounts = await fetchAdminAccounts();
+  return accounts.find((a) => a.id === accountId) as AdminAccount;
 }
 
-/**
- * Master Admin: Edit and customize any account's details (Name, Owner, Phone, Email, Branch, Plan, Notes)
- */
-export function updateAdminAccount(
+/** Master Admin: edit a tenant's profile. Server-enforced. */
+export async function updateAdminAccount(
   accountId: string,
-  updates: Partial<AdminAccount>
-): AdminAccount {
-  const accounts = getAdminAccounts();
-  const index = accounts.findIndex((a) => a.id === accountId);
-  if (index === -1) {
-    throw new Error(`Account "${accountId}" not found.`);
-  }
-
-  const updated: AdminAccount = {
-    ...accounts[index],
-    ...updates,
-    id: accounts[index].id, // preserve ID
-  };
-
-  accounts[index] = updated;
-  saveAdminAccounts(accounts);
-  return updated;
+  updates: Partial<Pick<AdminAccount, "name" | "ownerName" | "email" | "phone" | "notes" | "plan">>
+): Promise<AdminAccount> {
+  assertSuperAdmin();
+  await api(`/platform/tenants/${accountId}`, { method: "PATCH", body: updates });
+  const accounts = await fetchAdminAccounts();
+  return accounts.find((a) => a.id === accountId) as AdminAccount;
 }
 
-/**
- * Add a new agency / partner account
- */
-export function addNewAccount(
-  data: Omit<AdminAccount, "id" | "createdAt" | "lastActiveAt" | "totalBookings" | "whatsappUsed">
-): AdminAccount {
-  const accounts = getAdminAccounts();
-  const newId = `biz_${Date.now().toString(36)}`;
-  const created: AdminAccount = {
-    ...data,
-    id: newId,
-    whatsappUsed: 0,
-    totalBookings: 0,
-    createdAt: new Date().toISOString(),
-    lastActiveAt: new Date().toISOString(),
-  };
+export interface CreatedTenant {
+  id: string;
+  name: string;
+  admin: { id: string; email: string; role: string } | null;
+  /** Shown once, only when the password was generated server-side. Never recoverable. */
+  initialPassword?: string;
+}
 
-  accounts.unshift(created);
-  saveAdminAccounts(accounts);
+/** Provision a new tenant together with its first admin user. */
+export async function addNewAccount(data: {
+  name: string;
+  ownerName: string;
+  email: string;
+  phone?: string;
+  whatsappMonthlyLimit?: number;
+}): Promise<CreatedTenant> {
+  assertSuperAdmin();
+  const created = await api<CreatedTenant>("/platform/tenants", { method: "POST", body: data });
+  await fetchAdminAccounts();
   return created;
 }
 
 /**
- * Delete an account
+ * Deactivate a tenant.
+ *
+ * Soft, not destructive: the tenant is blocked and its sessions revoked, but bookings, invoices
+ * and audit records are preserved. A hard delete would cascade away the financial history.
  */
-export function deleteAccount(accountId: string): void {
-  const accounts = getAdminAccounts();
-  const filtered = accounts.filter((a) => a.id !== accountId);
-  saveAdminAccounts(filtered);
+export async function deleteAccount(accountId: string): Promise<void> {
+  assertSuperAdmin();
+  await api(`/platform/tenants/${accountId}/deactivate`, { method: "POST" });
+  invalidateAdminAccounts();
 }

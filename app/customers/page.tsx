@@ -9,6 +9,8 @@ import { api, formatCurrency, formatDate, statusTone } from "@/lib/api";
 import { useDisplayCurrency } from "@/lib/currency";
 import { AlertTriangle, CalendarDays, Edit, Mail, MessageCircle, MoreHorizontal, Phone, Plane, Plus, Repeat, Search, UserCheck, Users, UserX, X } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { PhoneInput } from "@/components/ui/phone-input";
+import { formatPhoneDisplay, parsePhoneNumber, validatePhoneNumber } from "@/lib/phone-utils";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -100,7 +102,13 @@ function CustomerFormModal({ mode, customer, onClose, onSaved }: { mode: "create
     event.preventDefault();
     const errs: Record<string, string> = {};
     if (!form.name.trim()) errs.name = "Name is required.";
-    if (!/^\d{10}$/.test(form.phone.replace(/\D/g, ""))) errs.phone = "Enter a valid 10-digit phone number.";
+    const parsed = parsePhoneNumber(form.phone);
+    const phoneVal = validatePhoneNumber(parsed.country.iso, parsed.nationalNumber);
+    if (!form.phone.trim()) {
+      errs.phone = "Phone / WhatsApp number is required.";
+    } else if (!phoneVal.isValid) {
+      errs.phone = phoneVal.error || "Enter a valid phone number.";
+    }
     if (form.email && !EMAIL_RE.test(form.email.trim())) errs.email = "Enter a valid email address.";
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
@@ -131,9 +139,24 @@ function CustomerFormModal({ mode, customer, onClose, onSaved }: { mode: "create
           <Field label="Full Name" required error={errors.name}>
             <input value={form.name} onChange={(e) => { setForm((f) => ({ ...f, name: e.target.value })); setErrors((er) => { const n = { ...er }; delete n.name; return n; }); }} placeholder="e.g. Rahul Sharma" className="h-11 w-full rounded-md border border-[#cfdbea] px-3 text-sm outline-none focus:border-[#1688f9]" />
           </Field>
-          <Field label="WhatsApp Number" required error={errors.phone}>
-            <input value={form.phone} onChange={(e) => { setForm((f) => ({ ...f, phone: e.target.value })); setErrors((er) => { const n = { ...er }; delete n.phone; return n; }); }} placeholder="98765 43210" className="h-11 w-full rounded-md border border-[#cfdbea] px-3 text-sm outline-none focus:border-[#1688f9]" />
-          </Field>
+          <div>
+            <label className="mb-2 block text-sm font-semibold">
+              WhatsApp Number <span className="text-red-500">*</span>
+            </label>
+            <PhoneInput
+              value={form.phone}
+              error={errors.phone}
+              onChange={(e164, isValid, err) => {
+                setForm((f) => ({ ...f, phone: e164 }));
+                setErrors((er) => {
+                  const n = { ...er };
+                  if (isValid) delete n.phone;
+                  else if (err) n.phone = err;
+                  return n;
+                });
+              }}
+            />
+          </div>
           <Field label="Email" required={false} error={errors.email}>
             <input value={form.email} onChange={(e) => { setForm((f) => ({ ...f, email: e.target.value })); setErrors((er) => { const n = { ...er }; delete n.email; return n; }); }} placeholder="rahul@gmail.com" className="h-11 w-full rounded-md border border-[#cfdbea] px-3 text-sm outline-none focus:border-[#1688f9]" />
           </Field>
@@ -302,7 +325,7 @@ export default function CustomersPage() {
                           </span>
                         </Link>
                       </td>
-                      <td className="px-4 py-3"><div className="font-semibold text-slate-900">{c.phone}</div><div className="text-xs text-[#526282]">{c.email || "—"}</div></td>
+                      <td className="px-4 py-3"><div className="font-semibold text-slate-900">{formatPhoneDisplay(c.phone)}</div><div className="text-xs text-[#526282]">{c.email || "—"}</div></td>
                       <td className="px-4 py-3 font-semibold text-slate-800">{c.bookings}</td>
                       <td className="px-4 py-3 text-xs text-slate-600 whitespace-pre-line">{c.last}</td>
                       <td className="px-4 py-3"><CustomerBadge status={c.status} /></td>
@@ -379,7 +402,7 @@ function CustomerPanel({ data, onClose }: { data: CustomerDetail; onClose: () =>
 function OverviewTab({ data }: { data: CustomerDetail }) {
   return <div>
     <div className="space-y-4 py-5 text-sm">
-      <p><Phone className="mr-4 inline h-4 w-4" />+91 {data.phone} <MessageCircle className="float-right h-5 w-5 text-green-500" /></p>
+      <p><Phone className="mr-4 inline h-4 w-4" />{formatPhoneDisplay(data.phone)} <MessageCircle className="float-right h-5 w-5 text-green-500" /></p>
       <p><Mail className="mr-4 inline h-4 w-4" />{data.email || "—"}</p>
       <p><CalendarDays className="mr-4 inline h-4 w-4" />Joined {formatDate(data.createdAt)}</p>
     </div>

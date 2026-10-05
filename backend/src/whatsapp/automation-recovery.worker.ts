@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { Queue, Worker } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
-import { AUTOMATION_QUEUE, WHATSAPP_SEND_QUEUE } from '../queue/queue.module';
+import { AUTOMATION_QUEUE, MAX_SEND_ATTEMPTS, WHATSAPP_SEND_QUEUE } from '../queue/queue.module';
 
 const RECOVERY_SCAN = 'recovery-scan';
 
@@ -16,6 +16,7 @@ export class AutomationRecoveryWorker implements OnModuleInit, OnApplicationShut
   private readonly logger = new Logger(AutomationRecoveryWorker.name);
   private worker?: Worker;
   private whatsappQueue?: Queue;
+  private automationQueue?: Queue;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -25,7 +26,7 @@ export class AutomationRecoveryWorker implements OnModuleInit, OnApplicationShut
       maxRetriesPerRequest: 0,
     };
     this.whatsappQueue = new Queue(WHATSAPP_SEND_QUEUE, { connection });
-    const automationQueue = new Queue(AUTOMATION_QUEUE, { connection });
+    this.automationQueue = new Queue(AUTOMATION_QUEUE, { connection });
 
     this.worker = new Worker(
       AUTOMATION_QUEUE,
@@ -42,7 +43,7 @@ export class AutomationRecoveryWorker implements OnModuleInit, OnApplicationShut
     });
     this.worker.on('error', (err) => this.logger.error(`Recovery worker error: ${err.message}`));
 
-    automationQueue
+    this.automationQueue
       .upsertJobScheduler(RECOVERY_SCAN, { every: 45000 }, { name: RECOVERY_SCAN })
       .then(() => this.logger.log('Recovery scheduler installed'))
       .catch((err) => this.logger.warn(`Could not install recovery scheduler: ${err.message}`));
@@ -51,6 +52,7 @@ export class AutomationRecoveryWorker implements OnModuleInit, OnApplicationShut
   async onApplicationShutdown() {
     await this.worker?.close();
     await this.whatsappQueue?.close();
+    await this.automationQueue?.close();
   }
 
   private async scan() {
@@ -74,6 +76,7 @@ export class AutomationRecoveryWorker implements OnModuleInit, OnApplicationShut
     // so re-adding is safe even if the job is already present.
     const due = await this.prisma.scheduledMessage.findMany({
       where: { status: 'SCHEDULED', scheduledAt: { lte: now } },
+      orderBy: { scheduledAt: 'asc' },
       take: 500,
       select: { id: true },
     });
@@ -86,7 +89,7 @@ export class AutomationRecoveryWorker implements OnModuleInit, OnApplicationShut
         {
           jobId,
           delay: 0,
-          attempts: 3,
+          attempts: MAX_SEND_ATTEMPTS,
           backoff: { type: 'exponential', delay: 10000 },
           removeOnComplete: true,
           removeOnFail: false,

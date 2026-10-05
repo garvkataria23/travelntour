@@ -1,3 +1,4 @@
+import * as jspdf from 'jspdf';
 import { renderInvoicePdf } from '../invoices/invoice-pdf.util';
 import { compressJson, compressPdf, compressionRatio, decompressJson, decompressPdf } from './pdf-compression';
 
@@ -156,15 +157,16 @@ describe('pdf compression', () => {
   it('fails loudly if jsPDF loses the hooks the determinism depends on', () => {
     // A silent no-op here is the bug this whole mechanism exists to prevent: the PDF
     // still renders, it is just no longer reproducible. The renderer therefore throws.
-    const jspdf = require('jspdf') as { jsPDF: unknown };
-    const original = jspdf.jsPDF;
+    // Mutated through a cast because the test replaces the whole jsPDF export with a fake.
+    const jspdfModule = jspdf as unknown as { jsPDF: unknown };
+    const original = jspdfModule.jsPDF;
     try {
-      jspdf.jsPDF = function Fake() {
+      jspdfModule.jsPDF = function Fake() {
         return { internal: { pageSize: { getWidth: () => 595 } } };
       } as never;
       expect(() => render()).toThrow(/setFileId/);
     } finally {
-      jspdf.jsPDF = original;
+      jspdfModule.jsPDF = original;
     }
   });
 

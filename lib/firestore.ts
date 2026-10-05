@@ -293,13 +293,43 @@ export async function saveBackupToFirestore(businessId: string, backupData: Reco
  * Export complete portable JSON backup for business from Firestore
  */
 export async function exportFullBusinessBackup(businessId: string) {
-  const [customers, bookings, invoices, expenses, income] = await Promise.all([
-    getCustomersFromFirestore(businessId).catch(() => []),
-    getBookingsFromFirestore(businessId).catch(() => []),
-    getInvoicesFromFirestore(businessId).catch(() => []),
-    getExpensesFromFirestore(businessId).catch(() => []),
-    getIncomeFromFirestore(businessId).catch(() => []),
+  // Fail loudly. Every read used to be `.catch(() => [])`, which turned a permission-denied, an
+  // offline client, a missing composite index or a Firestore outage into an EMPTY-but-successful
+  // backup — and the UI then reported "Excel backup downloaded successfully, 6 sheets included".
+  // A silently empty backup is the worst possible failure mode on this path: it looks like a
+  // safety net and is not one.
+  const results = await Promise.allSettled([
+    getCustomersFromFirestore(businessId),
+    getBookingsFromFirestore(businessId),
+    getInvoicesFromFirestore(businessId),
+    getExpensesFromFirestore(businessId),
+    getIncomeFromFirestore(businessId),
   ]);
+
+  const names = ["customers", "bookings", "invoices", "expenses", "income"] as const;
+  const failures: string[] = [];
+  const data: Record<string, unknown[]> = {};
+
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled") {
+      data[names[index]] = result.value;
+    } else {
+      failures.push(`${names[index]}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+      data[names[index]] = [];
+    }
+  });
+
+  if (failures.length > 0) {
+    throw new Error(
+      `Backup is incomplete — ${failures.length} of ${names.length} collections could not be read, so this export would be missing data. Refusing to produce a partial backup.\n${failures.join("\n")}`,
+    );
+  }
+
+  const customers = data.customers as unknown[];
+  const bookings = data.bookings as unknown[];
+  const invoices = data.invoices as unknown[];
+  const expenses = data.expenses as unknown[];
+  const income = data.income as unknown[];
 
   return {
     version: "1.0",
@@ -312,12 +342,6 @@ export async function exportFullBusinessBackup(businessId: string) {
       expenses: expenses.length,
       income: income.length,
     },
-    data: {
-      customers,
-      bookings,
-      invoices,
-      expenses,
-      income,
-    },
+    data: { customers, bookings, invoices, expenses, income },
   };
 }

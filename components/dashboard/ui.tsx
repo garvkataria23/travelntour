@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { AlertCircle, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Copy, Download, Eye, Hourglass, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { formatPhoneDisplay } from "@/lib/phone-utils";
 
 const toneClasses: Record<string, string> = {
   blue: "border-blue-100 bg-gradient-to-br from-white to-blue-50 text-[#2088f1]",
@@ -91,6 +92,10 @@ export interface ApiBookingRow {
   status: string;
   amount?: number | null;
   source?: string | null;
+  createdBy?: string | null;
+  creatorName?: string | null;
+  creatorEmail?: string | null;
+  creatorRole?: string | null;
   latestMessage?: { status: string | null; scheduledAt: string } | null;
 }
 
@@ -116,7 +121,24 @@ export function BookingsTable({ compact = false, dense = false, rows: apiRows, h
     const date = new Date(row.departureDate);
     const dateLabel = `${String(date.getDate()).padStart(2, "0")} ${date.toLocaleString("en", { month: "short" })} ${date.getFullYear()}`;
     const messageStatus = row.latestMessage?.status;
-    return { key: row.id || row.pnr, id: row.id, customer: row.customerName, phone: row.customerPhone, initials: initial, pnr: row.pnr, flight, airline: row.airline || "—", route, routeLabel, departure, date: dateLabel, status: row.status, whatsapp: messageStatus || "SCHEDULED" };
+    return {
+      key: row.id || row.pnr,
+      id: row.id,
+      customer: row.customerName,
+      phone: formatPhoneDisplay(row.customerPhone),
+      initials: initial,
+      pnr: row.pnr,
+      flight,
+      airline: row.airline || "—",
+      route,
+      routeLabel,
+      departure,
+      date: dateLabel,
+      status: row.status,
+      whatsapp: messageStatus || "SCHEDULED",
+      creatorName: row.creatorName || "Staff Desk",
+      creatorRole: row.creatorRole || "STAFF",
+    };
   });
 
   const cellPadding = dense ? "px-3 py-2" : "px-3.5 py-3";
@@ -134,6 +156,7 @@ export function BookingsTable({ compact = false, dense = false, rows: apiRows, h
               <th className="px-3.5 py-3 font-semibold">Route</th>
               <th className="px-3.5 py-3 font-semibold">Departure</th>
               {!compact ? <th className="px-3.5 py-3 font-semibold">Journey Date</th> : null}
+              {!compact ? <th className="px-3.5 py-3 font-semibold">Booked By</th> : null}
               <th className="px-3.5 py-3 font-semibold">Status</th>
               <th className="px-3.5 py-3 font-semibold">WhatsApp</th>
               <th className="px-3.5 py-3 font-semibold">{compact ? "" : "Actions"}</th>
@@ -144,7 +167,7 @@ export function BookingsTable({ compact = false, dense = false, rows: apiRows, h
               const isHighlighted = !!(row.id && highlightedIds?.has(row.id));
               return (
               <tr
-                key={row.pnr}
+                key={`${row.key}-${index}`}
                 className={`transition-all duration-300 ${
                   isHighlighted
                     ? "bg-emerald-50/90 ring-1 ring-inset ring-emerald-400"
@@ -192,6 +215,14 @@ export function BookingsTable({ compact = false, dense = false, rows: apiRows, h
                 <td className={cellPadding}><div className="font-semibold text-slate-900">{row.route}</div>{!compact ? <div className="text-xs text-slate-500">{row.routeLabel}</div> : null}</td>
                 <td className={cellPadding}><span className="font-mono text-xs font-semibold text-slate-800">{row.departure}</span></td>
                 {!compact ? <td className={cellPadding}><span className="font-mono text-xs text-slate-700">{row.date}</span></td> : null}
+                {!compact ? (
+                  <td className={cellPadding}>
+                    <div className="text-xs font-bold text-slate-900">{row.creatorName}</div>
+                    <span className="inline-block rounded bg-blue-50 px-1.5 py-0.2 text-[10px] font-extrabold text-blue-700">
+                      {row.creatorRole}
+                    </span>
+                  </td>
+                ) : null}
                 <td className={cellPadding}>{compact ? <span className="rounded-md bg-[#e0efff] px-2.5 py-0.5 text-xs font-bold text-[#0979ee]">Today</span> : <StatusBadge value={row.status} />}</td>
                 <td className={cellPadding}><WhatsAppBadge value={row.whatsapp} /></td>
                 <td className={cellPadding}>

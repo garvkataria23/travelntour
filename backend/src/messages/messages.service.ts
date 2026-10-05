@@ -1,9 +1,8 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { MessageType, MessageStatus } from '@prisma/client';
 import { AuthUser } from '../common/current-user.decorator';
 import { paginationMeta } from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
-import { getQueues } from '../queue/queue.module';
+import { enqueueSendJob, getQueues } from '../queue/queue.module';
 import { AuditService } from '../audit/audit.service';
 import { messageTypeName } from '../templates/templates.service';
 import { SendManualMessageDto } from './dto/send-manual-message.dto';
@@ -29,8 +28,8 @@ export class MessagesService {
       to?: string;
     },
   ) {
-    const page = Number(query.page) || 1;
-    const limit = Number(query.limit) || 20;
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(1000, Math.max(1, Number(query.limit) || 20));
     const where: Record<string, unknown> = { businessId: user.businessId };
 
     if (query.type) where.messageType = query.type;
@@ -183,19 +182,7 @@ export class MessagesService {
     });
 
     const queues = getQueues();
-    const jobId = `sm_${row.id}`;
-    await queues.whatsappQueue.add(
-      'send',
-      { scheduledMessageId: row.id },
-      {
-        jobId,
-        delay: 0,
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 5000 },
-        removeOnComplete: true,
-        removeOnFail: false,
-      },
-    );
+    const jobId = await enqueueSendJob(queues.whatsappQueue, row.id);
     await this.prisma.scheduledMessage.update({ where: { id: row.id }, data: { bullmqJobId: jobId } });
 
     await this.audit.log(user, 'MESSAGE_SENT', 'ScheduledMessage', row.id, {
@@ -219,25 +206,17 @@ export class MessagesService {
       });
     }
     const scheduledAt = new Date();
+    // The retry generation is derived from the previous attempt count so the jobId is always
+    // unique, and persisted before enqueue so a crash cannot leave the row claiming SCHEDULED
+    // with no job behind it.
+    const sequence = (message.attempts ?? 0) + 1;
     const row = await this.prisma.scheduledMessage.update({
       where: { id },
-      data: { status: 'SCHEDULED', scheduledAt, attempts: 0, lastError: null, failedAt: null },
+      data: { status: 'SCHEDULED', scheduledAt, attempts: sequence, lastError: null, failedAt: null },
     });
 
     const queues = getQueues();
-    const jobId = `sm_${row.id}`;
-    await queues.whatsappQueue.add(
-      'send',
-      { scheduledMessageId: row.id },
-      {
-        jobId,
-        delay: 0,
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 5000 },
-        removeOnComplete: true,
-        removeOnFail: false,
-      },
-    );
+    const jobId = await enqueueSendJob(queues.whatsappQueue, row.id, { sequence });
     await this.prisma.scheduledMessage.update({ where: { id }, data: { bullmqJobId: jobId } });
 
     await this.audit.log(user, 'MESSAGE_RETRIED', 'ScheduledMessage', id, {

@@ -15,6 +15,7 @@ import {
   evaluateQuotaStatus,
   getStoredQuota,
 } from "@/lib/whatsapp-quota";
+import { formatPhoneDisplay } from "@/lib/phone-utils";
 
 interface MessageMeta {
   total: number;
@@ -153,7 +154,7 @@ export default function WhatsAppMessagesPage() {
     id: m.id,
     customer: m.customer?.name ?? "—",
     customerId: m.customer?.id,
-    phone: m.customer?.phone ?? "—",
+    phone: formatPhoneDisplay(m.customer?.phone),
     initials: m.customer?.name ? initialsOf(m.customer.name) : "—",
     type: m.messageTypeLabel || m.messageType,
     pnr: m.booking?.pnr ?? "—",
@@ -346,7 +347,7 @@ function MessagePanel({
     <div className="border-b border-[#e5edf6] px-5 pb-4">
       <div className="flex items-center gap-4">
         <span className="grid h-14 w-14 place-items-center rounded-full bg-blue-100 text-lg font-bold text-blue-700">{customer?.name ? initialsOf(customer.name) : "—"}</span>
-        <div className="flex-1"><b>{customer?.name ?? "—"}</b><div className="text-sm text-[#596782]">+91 {customer?.phone ?? ""}</div></div>
+        <div className="flex-1"><b>{customer?.name ?? "—"}</b><div className="text-sm text-[#596782]">{formatPhoneDisplay(customer?.phone)}</div></div>
         {customer ? <Link href={`/customers/${customer.id}`} className="rounded-lg border border-[#d6e1ef] px-4 py-2 text-sm font-bold text-[#087df0]">View Customer</Link> : null}
       </div>
       {booking ? <p className="mt-4 text-sm leading-6">PNR: {booking.pnr} &nbsp;|&nbsp; Flight: {booking.flightNumber || "—"}<br />{route}<br />{booking.departureDate ? formatDate(booking.departureDate) : "—"}{booking.departureTime ? `, ${booking.departureTime}` : ""}</p> : <p className="mt-4 text-sm text-[#596782]">No booking attached.</p>}
@@ -360,7 +361,7 @@ function MessagePanel({
       {tab === "conversation" ? (
         <div>
           {data.renderedContent ? <div className="mx-auto rounded-xl bg-[#d9ffd0] p-5 shadow-sm"><p className="whitespace-pre-line">{data.renderedContent}</p><div className="mt-2 text-right text-sm text-[#596782]">{data.sentAt ? formatDate(data.sentAt, true) : formatDate(data.scheduledAt, true)} {statusTone(data.status) === "danger" ? "✕" : statusTone(data.status) === "pending" ? "⏱" : "✓✓"}</div></div> : <p className="py-8 text-center text-sm text-[#596782]">No message content rendered.</p>}
-          {(data.deliveredAt || data.readAt || data.failedAt) ? <div className="mt-5 space-y-3 text-sm">{data.deliveredAt ? <p>✅ Delivered to +91 {customer?.phone ?? ""}<br /><span className="text-[#596782]">{formatDate(data.deliveredAt, true)}</span></p> : null}{data.readAt ? <p>☑️ Read by +91 {customer?.phone ?? ""}<br /><span className="text-[#596782]">{formatDate(data.readAt, true)}</span></p> : null}{data.failedAt ? <p className="text-rose-600">✕ Delivery failed<br /><span className="text-[#596782]">{formatDate(data.failedAt, true)}{data.lastError ? ` · ${data.lastError}` : ""}</span></p> : null}</div> : null}
+          {(data.deliveredAt || data.readAt || data.failedAt) ? <div className="mt-5 space-y-3 text-sm">{data.deliveredAt ? <p>✅ Delivered to {formatPhoneDisplay(customer?.phone)}<br /><span className="text-[#596782]">{formatDate(data.deliveredAt, true)}</span></p> : null}{data.readAt ? <p>☑️ Read by {formatPhoneDisplay(customer?.phone)}<br /><span className="text-[#596782]">{formatDate(data.readAt, true)}</span></p> : null}{data.failedAt ? <p className="text-rose-600">✕ Delivery failed<br /><span className="text-[#596782]">{formatDate(data.failedAt, true)}{data.lastError ? ` · ${data.lastError}` : ""}</span></p> : null}</div> : null}
         </div>
       ) : (
         <div>
@@ -462,7 +463,7 @@ function SendComposeModal({
 
         <div className="space-y-4">
           <label className="block"><span className="mb-2 block text-sm font-semibold">Customer <span className="text-red-500">*</span></span>
-            <div className="flex h-11 items-center gap-2 rounded-md border border-[#cfdbea] px-3"><UserIcon className="h-5 w-5 text-[#596782]" /><select value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={isBlocked} className="h-11 w-full bg-transparent text-sm outline-none disabled:cursor-not-allowed"><option value="">Select customer...</option>{(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}</select></div>
+            <div className="flex h-11 items-center gap-2 rounded-md border border-[#cfdbea] px-3"><UserIcon className="h-5 w-5 text-[#596782]" /><select value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={isBlocked} className="h-11 w-full bg-transparent text-sm outline-none disabled:cursor-not-allowed"><option value="">Select customer...</option>{(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} · {formatPhoneDisplay(c.phone)}</option>)}</select></div>
           </label>
           <label className="block"><span className="mb-2 block text-sm font-semibold">Message <span className="text-red-500">*</span></span>
             <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} disabled={isBlocked} placeholder={isBlocked ? "Messaging locked. To upgrade limits, contact Admin." : "Type the message to send on customer's WhatsApp..."} className="w-full rounded-md border border-[#cfdbea] px-3 py-2 text-sm outline-none focus:border-[#1688f9] disabled:cursor-not-allowed disabled:bg-slate-50" />

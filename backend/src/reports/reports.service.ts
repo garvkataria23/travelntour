@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { BookingStatus, MessageStatus } from '@prisma/client';
+import { BookingStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { AuthUser } from '../common/current-user.decorator';
+import { computeInvoiceTotals } from '../common/invoice-totals';
+import { money, toNumber } from '../common/money';
 import { BASE_CURRENCY } from '../currency/decimals';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -18,15 +20,16 @@ export class ReportsService {
   // Overview (dashboard)
   // ------------------------------------------------------------------
 
-  async overview(user: AuthUser, daysParam?: number) {
+  async overview(user: AuthUser, daysParam?: number, opts?: { from?: string; to?: string }) {
     const timezone = await this.tz(user);
     const businessId = user.businessId;
     const nowLocal = DateTime.now().setZone(timezone);
     const startToday = nowLocal.startOf('day').toUTC().toJSDate();
     const endToday = nowLocal.plus({ days: 1 }).startOf('day').toUTC().toJSDate();
+    const range = opts ? this.dateRange(timezone, opts) : null;
 
     const [totalBookings, todayJourneys, upcomingJourneys, messageSummary, recentScheduled] = await Promise.all([
-      this.prisma.booking.count({ where: { businessId } }),
+      this.prisma.booking.count({ where: { businessId, ...(range ? { createdAt: range } : {}) } }),
       this.prisma.booking.count({
         where: { businessId, departureDate: { gte: startToday, lt: endToday } },
       }),
@@ -81,22 +84,50 @@ export class ReportsService {
 
     const [revenueAgg, manualIncomeAgg, bookingCostAgg, expenseAgg] = await Promise.all([
       this.prisma.booking.aggregate({
-        where: { businessId, status: { not: 'CANCELLED' }, amount: { not: null } },
+        where: {
+          businessId,
+          status: { not: 'CANCELLED' },
+          amount: { not: null },
+          ...(range ? { createdAt: range } : {}),
+        },
         _sum: { amount: true },
       }),
-      this.prisma.income.aggregate({ where: { businessId }, _sum: { amount: true } }),
+      this.prisma.income.aggregate({
+        where: {
+          businessId,
+          ...(range ? { receivedOn: range } : {}),
+        },
+        _sum: { amount: true },
+      }),
       this.prisma.booking.aggregate({
-        where: { businessId, status: { not: 'CANCELLED' }, cost: { not: null } },
+        where: {
+          businessId,
+          status: { not: 'CANCELLED' },
+          cost: { not: null },
+          ...(range ? { createdAt: range } : {}),
+        },
         _sum: { cost: true },
       }),
-      this.prisma.expense.groupBy({ by: ['category'], where: { businessId }, _sum: { amount: true } }),
+      this.prisma.expense.groupBy({
+        by: ['category'],
+        where: {
+          businessId,
+          ...(range ? { incurredOn: range } : {}),
+        },
+        _sum: { amount: true },
+      }),
     ]);
-    const revenueTotal = revenueAgg._sum.amount ?? 0;
-    const manualIncome = manualIncomeAgg._sum.amount ?? 0;
-    const ticketCost = bookingCostAgg._sum.cost ?? 0;
-    const totalIncome = revenueTotal + manualIncome;
-    const directCost = (expenseAgg.find((e) => e.category === 'DIRECT')?._sum.amount ?? 0) + ticketCost;
-    const operatingCost = expenseAgg.find((e) => e.category === 'OPERATING')?._sum.amount ?? 0;
+    // Aggregates over Decimal columns return Prisma Decimal objects, so every value is coerced
+    // before any arithmetic. Coercing here (rather than per field) keeps the P&L internally
+    // consistent and lets the totals round once, at the end.
+    const revenueTotal = toNumber(revenueAgg._sum.amount);
+    const manualIncome = toNumber(manualIncomeAgg._sum.amount);
+    const ticketCost = toNumber(bookingCostAgg._sum.cost);
+    const totalIncome = money(revenueTotal + manualIncome, BASE_CURRENCY);
+    const directCost = money(toNumber(expenseAgg.find((e) => e.category === 'DIRECT')?._sum.amount) + ticketCost, BASE_CURRENCY);
+    const operatingCost = money(toNumber(expenseAgg.find((e) => e.category === 'OPERATING')?._sum.amount), BASE_CURRENCY);
+    const grossProfit = money(totalIncome - directCost, BASE_CURRENCY);
+    const netProfit = money(grossProfit - operatingCost, BASE_CURRENCY);
 
     return {
       stats: {
@@ -109,8 +140,8 @@ export class ReportsService {
         ticketCost,
         directCost,
         operatingCost,
-        grossProfit: totalIncome - directCost,
-        netProfit: totalIncome - directCost - operatingCost,
+        grossProfit,
+        netProfit,
       },
       messageStatus: {
         total,
@@ -206,11 +237,14 @@ export class ReportsService {
     });
     const byMonth = new Map<string, { revenue: number; count: number }>();
     let revenueTotal = 0;
+    // Rounded on accumulation: `amount` is a Decimal column, so summing raw values and rounding
+    // once at the end is what keeps a month total from drifting.
     for (const row of rows) {
-      revenueTotal += row.amount ?? 0;
+      const amount = toNumber(row.amount);
+      revenueTotal = money(revenueTotal + amount, BASE_CURRENCY);
       const label = DateTime.fromJSDate(row.createdAt).setZone(timezone).toFormat('MMM yyyy');
       const bucket = byMonth.get(label) ?? { revenue: 0, count: 0 };
-      bucket.revenue += row.amount ?? 0;
+      bucket.revenue = money(bucket.revenue + amount, BASE_CURRENCY);
       bucket.count += 1;
       byMonth.set(label, bucket);
     }
@@ -263,7 +297,7 @@ export class ReportsService {
     const byTitle = new Map<string, { total: number; count: number }>();
     for (const row of rows) {
       const bucket = byTitle.get(row.title) ?? { total: 0, count: 0 };
-      bucket.total += row.amount ?? 0;
+      bucket.total = money(bucket.total + toNumber(row.amount), BASE_CURRENCY);
       bucket.count += 1;
       byTitle.set(row.title, bucket);
     }
@@ -272,7 +306,7 @@ export class ReportsService {
     for (const row of rows) {
       const label = DateTime.fromJSDate(row.incurredOn).setZone(timezone).toFormat('MMM yyyy');
       const bucket = byMonth.get(label) ?? { total: 0, count: 0 };
-      bucket.total += row.amount ?? 0;
+      bucket.total = money(bucket.total + toNumber(row.amount), BASE_CURRENCY);
       bucket.count += 1;
       byMonth.set(label, bucket);
     }
@@ -303,6 +337,7 @@ export class ReportsService {
     const range = this.dateRange(timezone, opts);
     const where = {
       businessId: user.businessId,
+      status: { not: 'CANCELLED' as BookingStatus },
       invoiceIssuedAt: { not: null },
       ...(range ? { invoiceIssuedAt: range } : {}),
     };
@@ -321,6 +356,7 @@ export class ReportsService {
           discount: true,
           taxRate: true,
           taxAmount: true,
+          currency: true,
           invoiceItems: { select: { amount: true } },
         },
       }),
@@ -330,21 +366,20 @@ export class ReportsService {
     let billed = 0;
     let collected = 0;
     for (const row of rows) {
-      const items = row.invoiceItems ?? [];
-      const subtotal = items.length > 0 ? items.reduce((s, i) => s + (i.amount || 0), 0) : row.baseFare ?? row.amount ?? 0;
-      const discount = row.discount ?? 0;
-      const taxable = Math.max(0, subtotal - discount);
-      const rate = row.taxRate ?? 0;
-      const tax = items.length > 0 || !row.taxAmount ? Math.round(taxable * (rate / 100) * 100) / 100 : row.taxAmount;
-      const total = Math.max(0, taxable + tax);
-      const paid = Math.min(row.paidAmount ?? 0, total);
-      billed += total;
-      collected += paid;
+      // Single source of truth: this used to be an inline copy of the invoice total math that had
+      // already drifted from InvoicesService, so the receivables report could disagree with the
+      // invoice it was reporting on.
+      const currency = row.currency ?? undefined;
+      const totals = computeInvoiceTotals(row, row.invoiceItems ?? []);
+      const total = totals.total;
+      const paid = money(Math.min(toNumber(row.paidAmount), total), currency);
+      billed = money(billed + total, currency);
+      collected = money(collected + paid, currency);
 
       const label = DateTime.fromJSDate(row.invoiceIssuedAt!).setZone(timezone).toFormat('MMM yyyy');
       const bucket = byMonth.get(label) ?? { billed: 0, collected: 0, count: 0 };
-      bucket.billed += total;
-      bucket.collected += paid;
+      bucket.billed = money(bucket.billed + total, currency);
+      bucket.collected = money(bucket.collected + paid, currency);
       bucket.count += 1;
       byMonth.set(label, bucket);
     }
@@ -428,11 +463,20 @@ export class ReportsService {
 
   private dateRange(timezone: string, opts: { from?: string; to?: string }) {
     if (!opts.from && !opts.to) return null;
-    const gte = opts.from ? DateTime.fromISO(opts.from, { zone: timezone }).startOf('day').toUTC().toJSDate() : undefined;
-    const lte = opts.to ? DateTime.fromISO(opts.to, { zone: timezone }).plus({ days: 1 }).startOf('day').toUTC().toJSDate() : undefined;
+    let gte: Date | undefined;
+    let lt: Date | undefined;
+    if (opts.from) {
+      const dt = DateTime.fromISO(opts.from, { zone: timezone });
+      if (dt.isValid) gte = dt.startOf('day').toUTC().toJSDate();
+    }
+    if (opts.to) {
+      const dt = DateTime.fromISO(opts.to, { zone: timezone });
+      if (dt.isValid) lt = dt.plus({ days: 1 }).startOf('day').toUTC().toJSDate();
+    }
+    if (!gte && !lt) return null;
     return {
       ...(gte ? { gte } : {}),
-      ...(lte ? { lte } : {}),
+      ...(lt ? { lt } : {}),
     };
   }
 }

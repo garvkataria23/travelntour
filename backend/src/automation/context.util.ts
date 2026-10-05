@@ -1,4 +1,4 @@
-import { Booking, Business, Customer } from '@prisma/client';
+import { Booking, Customer } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { BASE_CURRENCY } from '../currency/decimals';
 import { TemplateContext } from '../templates/templates.service';

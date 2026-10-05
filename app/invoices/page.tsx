@@ -52,8 +52,9 @@ interface InvoiceList {
     totalBilled: number;
     totalCollected: number;
     outstanding: number;
+    currency: string;
   };
-  meta: { page: number; limit: number; total: number; pages: number };
+  meta: { page: number; limit: number; total: number; pages?: number; totalPages?: number };
 }
 
 export default function InvoicesPage() {
@@ -73,6 +74,8 @@ export default function InvoicesPage() {
   params.set("limit", String(limit));
 
   const list = useApi<InvoiceList>(`/invoices?${params.toString()}`, { refetchInterval: 15000 });
+  // Only used to label the Excel export with the real business name; cached like any other read.
+  const settings = useApi<{ business?: { name?: string | null } }>("/settings");
   const liveHighlights = useLiveHighlights("invoices");
   const pageIds = list.data?.items.map((row) => row.id) ?? [];
 
@@ -145,7 +148,20 @@ export default function InvoicesPage() {
       allParams.set("page", "1");
       allParams.set("limit", "1000");
       const all = await api<InvoiceList>(`/invoices?${allParams.toString()}`, { skipCache: true });
-      const blob = generateInvoicesRegisterExcel(all.items || [], "AED", "FlyConnect Travel Agency");
+      // The currency and business name used to be hardcoded, which meant an INR or EUR receivables
+      // register was exported with every column labelled "AED" and the wrong company name — even
+      // though the API had already returned the correct currency in `stats.currency`.
+      const businessName = settings.data?.business?.name?.trim();
+      if (!businessName) {
+        throw new Error(
+          "Business name is unavailable, so the export would be mislabelled. Load Settings and try again.",
+        );
+      }
+      const currency = all.stats?.currency?.trim();
+      if (!currency) {
+        throw new Error("Invoice currency is unavailable, so the export would be mislabelled.");
+      }
+      const blob = generateInvoicesRegisterExcel(all.items || [], currency, businessName);
       triggerFileDownload(blob, `FlyConnect_Invoices_Register_${new Date().toISOString().slice(0, 10)}.xlsx`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Unable to export invoices to Excel");
@@ -173,9 +189,9 @@ export default function InvoicesPage() {
         {actionError ? <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{actionError}</p> : null}
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard title="Total Billed" value={stats ? formatCurrency(stats.totalBilled) : "—"} icon={Receipt} tone="blue" sub={`${stats?.issued ?? 0} invoices issued`} />
-          <StatCard title="Collected" value={stats ? formatCurrency(stats.totalCollected) : "—"} icon={Banknote} tone="green" sub="amount received" />
-          <StatCard title="Outstanding" value={stats ? formatCurrency(stats.outstanding) : "—"} icon={TrendingDown} tone="orange" sub="yet to be collected" />
+          <StatCard title="Total Billed" value={stats ? formatCurrency(stats.totalBilled, stats.currency) : "—"} icon={Receipt} tone="blue" sub={`${stats?.issued ?? 0} invoices issued`} />
+          <StatCard title="Collected" value={stats ? formatCurrency(stats.totalCollected, stats.currency) : "—"} icon={Banknote} tone="green" sub="amount received" />
+          <StatCard title="Outstanding" value={stats ? formatCurrency(stats.outstanding, stats.currency) : "—"} icon={TrendingDown} tone="orange" sub="yet to be collected" />
           <StatCard title="Payment Status" value={`${stats?.paid ?? 0}`} icon={CheckCircle2} tone="purple" sub={`${stats?.pending ?? 0} unpaid · ${stats?.partial ?? 0} partial`} />
         </div>
 
@@ -258,8 +274,8 @@ export default function InvoicesPage() {
               <span>Showing {(list.data!.meta.page - 1) * list.data!.meta.limit + 1} to {Math.min(list.data!.meta.page * list.data!.meta.limit, list.data!.meta.total)} of {list.data!.meta.total} invoices</span>
               <div className="flex items-center gap-2">
                 <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef] disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
-                <span className="px-2">Page {list.data!.meta.page} of {list.data!.meta.pages}</span>
-                <button disabled={page >= list.data!.meta.pages} onClick={() => setPage(page + 1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef] disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
+                <span className="px-2">Page {list.data!.meta.page} of {list.data!.meta.totalPages ?? list.data!.meta.pages ?? 1}</span>
+                <button disabled={page >= (list.data!.meta.totalPages ?? list.data!.meta.pages ?? 1)} onClick={() => setPage(page + 1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#d6e1ef] disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
               </div>
               <label className="flex items-center gap-3 rounded-lg border border-[#d6e1ef] bg-white px-4 py-2">Rows per page
                 <select value={limit} onChange={(event) => { setLimit(Number(event.target.value)); setPage(1); }} className="bg-transparent font-bold outline-none"><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option></select>

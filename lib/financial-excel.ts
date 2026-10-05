@@ -92,6 +92,14 @@ export interface FinancialReportData {
 function formatDate(val: string | Date | undefined): string {
   if (!val) return "—";
   try {
+    if (typeof val === "string") {
+      const match = val.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (match) {
+        const [, year, month, day] = match;
+        const d = new Date(Number(year), Number(month) - 1, Number(day));
+        return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+      }
+    }
     const d = new Date(val);
     if (isNaN(d.getTime())) return String(val);
     return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
@@ -123,7 +131,8 @@ export function generateFinancialReportExcel(data: FinancialReportData): Blob {
   const collectionRate =
     data.stats.invoiced > 0
       ? Math.round((data.stats.collected / data.stats.invoiced) * 1000) / 10
-      : 100;
+      : 0;
+  const directSupplierCost = Math.max(0, data.stats.directCost - data.stats.ticketCost);
 
   const summarySheetData: Array<Array<string | number>> = [
     ["FLYCONNECT TRAVEL AGENCY - EXECUTIVE FINANCIAL STATEMENT"],
@@ -138,7 +147,7 @@ export function generateFinancialReportExcel(data: FinancialReportData): Blob {
     ["Ancillary & Other Revenue (Commissions, Visas, Tours)", data.stats.manualIncome, "-"],
     ["TOTAL GROSS REVENUE", data.stats.totalIncome, "100.0%"],
     ["Less: Ticket Net Cost (Aviation COGS)", -data.stats.ticketCost, "-"],
-    ["Less: Direct Supplier Expenses (Hotels, Consolidators, Visas)", -(data.stats.directCost - data.stats.ticketCost), "-"],
+    ["Less: Direct Supplier Expenses (Hotels, Consolidators, Visas)", -directSupplierCost, "-"],
     ["TOTAL COST OF GOODS SOLD (DIRECT COGS)", -data.stats.directCost, "-"],
     ["GROSS PROFIT (GROSS MARGIN)", data.stats.grossProfit, `${grossMarginPct}%`],
     ["Less: Operating Overheads (Rent, Salaries, Software, Marketing)", -data.stats.operatingCost, "-"],

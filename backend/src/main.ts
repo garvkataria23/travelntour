@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { createDriveClientFromEnv } from './backup/google-drive.service-account';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { TransformInterceptor } from './common/transform.interceptor';
 
@@ -19,6 +20,67 @@ async function bootstrap() {
   if (allowedOrigins.size === 0) {
     throw new Error('FRONTEND_URL must list at least one allowed origin (comma separated).');
   }
+
+  // Known placeholder values from .env.example are rejected outright. A length-only check is
+  // not enough: those placeholders are long enough to pass it, so copying .env.example verbatim
+  // would sign every JWT in the fleet with a secret published in this repository.
+  const INSECURE_SECRET_MARKERS = [
+    'change-me',
+    'changeme',
+    'replace-me',
+    'your-',
+    'placeholder',
+    'example',
+    'secret',
+    'long-random',
+  ];
+
+  const assertStrongSecret = (name: string, value: string | undefined, minLength: number) => {
+    if (!value) {
+      throw new Error(`${name} must be configured.`);
+    }
+    const lowered = value.toLowerCase();
+    if (INSECURE_SECRET_MARKERS.some((marker) => lowered.includes(marker))) {
+      throw new Error(`${name} still contains a placeholder value from .env.example. Generate a real random secret.`);
+    }
+    if (value.length < minLength) {
+      throw new Error(`${name} must be at least ${minLength} characters long.`);
+    }
+  };
+
+  assertStrongSecret('JWT_SECRET', process.env.JWT_SECRET, 32);
+  assertStrongSecret('JWT_REFRESH_SECRET', process.env.JWT_REFRESH_SECRET, 32);
+
+  const appEnv = process.env.APP_ENV ?? process.env.NODE_ENV ?? 'development';
+  if (appEnv === 'production') {
+    if (!process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN) {
+      throw new Error(
+        'WHATSAPP_WEBHOOK_VERIFY_TOKEN must be set in production. Webhook verification fails closed without it.',
+      );
+    }
+    if (!process.env.WHATSAPP_WEBHOOK_APP_SECRET && !process.env.WHATSAPP_META_APP_SECRET) {
+      throw new Error(
+        'WHATSAPP_WEBHOOK_APP_SECRET (or WHATSAPP_META_APP_SECRET) must be set in production.',
+      );
+    }
+
+    const drive = createDriveClientFromEnv();
+    const rawSa = (process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH ?? '').toLowerCase();
+    if (
+      !drive.isConfigured() ||
+      !drive.folderId ||
+      INSECURE_SECRET_MARKERS.some((m) => rawSa.includes(m) || drive.email.toLowerCase().includes(m) || (drive.folderId ?? '').toLowerCase().includes(m))
+    ) {
+      throw new Error(
+        'Google Drive backup credentials (GOOGLE_SERVICE_ACCOUNT_KEY_PATH or GOOGLE_SERVICE_ACCOUNT_JSON) and GOOGLE_DRIVE_FOLDER_ID must be configured in production without placeholder values.',
+      );
+    }
+  }
+
+  app.enableShutdownHooks();
+
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.set('trust proxy', 1);
 
   app.use(helmet());
   app.enableCors({

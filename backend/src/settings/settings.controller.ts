@@ -1,12 +1,13 @@
 import { BadRequestException, Body, Controller, Get, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
-import { Roles } from '../common/roles.decorator';
+import { Permission, permissionsForRole, roleHas } from '../common/permissions';
+import { RequirePermissions } from '../common/permissions.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AutomationService, NotificationFlagName } from '../automation/automation.service';
+import { redactSetting } from './setting-redaction';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
-import { Role } from '@prisma/client';
 
 const NOTIFICATION_FLAGS: NotificationFlagName[] = [
   'notifyConfirmation',
@@ -26,7 +27,17 @@ export class SettingsController {
     private readonly automation: AutomationService,
   ) {}
 
+  /**
+   * Reads the tenant's configuration.
+   *
+   * The `preferences` key used to be the entire `BusinessSetting` row, which handed every
+   * authenticated user — including STAFF — the bank account number, IFSC/SWIFT, UPI id and GSTIN.
+   * Those fields are now redacted unless the caller holds SETTINGS_VIEW_SENSITIVE, so the counter
+   * role can still read notification preferences and tax configuration without being handed the
+   * company's banking details.
+   */
   @Get()
+  @RequirePermissions(Permission.SETTINGS_VIEW)
   async get(@CurrentUser() user: AuthUser) {
     const [business, setting, me, whatsappAccount] = await Promise.all([
       this.prisma.business.findUnique({ where: { id: user.businessId } }),
@@ -45,8 +56,10 @@ export class SettingsController {
         },
       }),
     ]);
+
     return {
       profile: me,
+      permissions: permissionsForRole(user.role),
       business: {
         id: business?.id,
         name: business?.name,
@@ -56,15 +69,31 @@ export class SettingsController {
         timezone: business?.timezone,
         currency: business?.currency,
       },
-      preferences: setting,
+      preferences: setting ? redactSetting(setting, roleHas(user.role, Permission.SETTINGS_VIEW_SENSITIVE)) : null,
       whatsapp: whatsappAccount ?? null,
     };
   }
 
   @Patch()
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @RequirePermissions(Permission.SETTINGS_MANAGE)
   async update(@CurrentUser() user: AuthUser, @Body() dto: UpdateSettingsDto) {
-    const [, setting] = await Promise.all([
+    if (dto.nextInvoiceNo !== undefined) {
+      const currentSetting = await this.prisma.businessSetting.findUnique({
+        where: { businessId: user.businessId },
+        select: { nextInvoiceNo: true },
+      });
+      if (currentSetting && dto.nextInvoiceNo < currentSetting.nextInvoiceNo) {
+        throw new BadRequestException({
+          message: `nextInvoiceNo cannot be decreased below current value (${currentSetting.nextInvoiceNo})`,
+          code: 'INVOICE_NUMBER_REWIND_PROHIBITED',
+        });
+      }
+    }
+
+    // Wrapped in a transaction: these two writes update one logical "tenant configuration". With
+    // Promise.all a failure in the second left the tenant half-configured — new logo and timezone
+    // applied while the GST toggles silently kept their old values.
+const [,] = await this.prisma.$transaction([
       this.prisma.business.update({
         where: { id: user.businessId },
         data: {

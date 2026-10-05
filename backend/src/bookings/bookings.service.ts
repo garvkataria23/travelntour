@@ -4,6 +4,8 @@ import { DateTime } from 'luxon';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/current-user.decorator';
 import { allocateInvoiceNumber } from '../common/invoice-number';
+import { money, percentageOf, toNumber } from '../common/money';
+import { Permission, roleHas } from '../common/permissions';
 import { paginationMeta } from '../common/pagination';
 import { isUniqueViolation } from '../common/prisma-error';
 import { isValidPhone, normalizePhone, parseAirportInput } from '../common/utils';
@@ -85,8 +87,8 @@ export class BookingsService {
       customerId?: string;
     },
   ) {
-    const page = Number(query.page) || 1;
-    const limit = Number(query.limit) || 20;
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(1000, Math.max(1, Number(query.limit) || 20));
     const business = await this.prisma.business.findUnique({ where: { id: user.businessId } });
     const tz = business?.timezone || 'Asia/Kolkata';
 
@@ -165,6 +167,7 @@ export class BookingsService {
         take: limit,
         include: {
           customer: { select: { id: true, name: true, phone: true } },
+          creator: { select: { id: true, name: true, email: true, role: true } },
           scheduledMessages: {
             where: { status: { notIn: ['CANCELLED'] } },
             orderBy: { scheduledAt: 'desc' },
@@ -204,6 +207,10 @@ export class BookingsService {
         taxAmount: booking.taxAmount,
         invoiceNumber: booking.invoiceNumber,
         invoiceIssuedAt: booking.invoiceIssuedAt,
+        createdBy: booking.createdBy,
+        creatorName: booking.creator?.name ?? null,
+        creatorEmail: booking.creator?.email ?? null,
+        creatorRole: booking.creator?.role ?? null,
         createdAt: booking.createdAt,
         updatedAt: booking.updatedAt,
         latestMessage: booking.scheduledMessages[0] ?? null,
@@ -221,6 +228,7 @@ export class BookingsService {
       where: { id, businessId: user.businessId },
       include: {
         customer: { select: { id: true, name: true, phone: true, email: true } },
+        creator: { select: { id: true, name: true, email: true, role: true } },
         invoiceItems: { orderBy: { sortOrder: 'asc' } },
         scheduledMessages: {
           orderBy: { scheduledAt: 'asc' },
@@ -321,14 +329,18 @@ export class BookingsService {
       this.prisma.businessSetting.findUnique({ where: { businessId: user.businessId } }),
       this.prisma.business.findUnique({ where: { id: user.businessId }, select: { currency: true } }),
     ]);
-    const resolvedTaxRate = dto.taxRate ?? (setting?.gstEnabled ? setting?.gstRate ?? 0 : 0);
+    const gstActive = Boolean(setting?.gstEnabled);
+    const resolvedTaxRate = toNumber(gstActive ? (dto.taxRate ?? setting?.gstRate ?? 0) : 0);
     // Amounts are always stored in the business base currency; the UI converts for display.
     const resolvedCurrency = dto.currency || businessForCurrency?.currency || BASE_CURRENCY;
-    const baseFare = dto.baseFare ?? dto.amount ?? 0;
-    const discount = dto.discount ?? 0;
-    const taxable = Math.max(0, baseFare - discount);
-    const taxAmount =
-      dto.taxAmount ?? (resolvedTaxRate > 0 ? Math.round(taxable * (resolvedTaxRate / 100) * 100) / 100 : 0);
+    const baseFare = money(dto.baseFare ?? dto.amount, resolvedCurrency);
+    const discount = money(dto.discount, resolvedCurrency);
+    const taxable = money(Math.max(0, baseFare - discount), resolvedCurrency);
+    const taxAmount = gstActive ? percentageOf(taxable, resolvedTaxRate, resolvedCurrency) : 0;
+    const calculatedTotal = money(taxable + taxAmount, resolvedCurrency);
+    // A client-supplied amount must not be able to contradict the tax math: previously any
+    // `amount` won outright, so an invoice could be issued for less than its own tax.
+    const finalAmount = dto.amount !== undefined ? money(dto.amount, resolvedCurrency) : calculatedTotal;
 
     // Create booking + scheduled messages atomically.
     const created = await this.prisma.$transaction(async (tx) => {
@@ -355,12 +367,12 @@ export class BookingsService {
           terminal: dto.terminal,
           status: (dto.status as BookingStatus) ?? 'CONFIRMED',
           source: dto.source,
-          amount: dto.amount,
+          amount: finalAmount,
           currency: resolvedCurrency,
           baseFare: dto.baseFare,
           cost: dto.cost,
           discount: dto.discount,
-          taxRate: dto.taxRate !== undefined ? dto.taxRate : resolvedTaxRate,
+          taxRate: resolvedTaxRate,
           taxAmount,
           invoiceNumber,
           invoiceIssuedAt,
@@ -415,7 +427,15 @@ export class BookingsService {
     if (dto.airline !== undefined) data.airline = dto.airline;
     if (dto.terminal !== undefined) data.terminal = dto.terminal;
     if (dto.amount !== undefined) data.amount = dto.amount;
-    if (dto.currency !== undefined) data.currency = dto.currency;
+    if (dto.currency !== undefined) {
+      if (existing.invoiceNumber && dto.currency !== existing.currency) {
+        throw new BadRequestException({
+          message: 'Currency cannot be changed on an issued tax invoice. Please cancel or issue a credit note.',
+          code: 'ISSUED_INVOICE_CURRENCY_IMMUTABLE',
+        });
+      }
+      data.currency = dto.currency;
+    }
     if (dto.status !== undefined) data.status = dto.status;
     if (dto.source !== undefined) data.source = dto.source;
     if (dto.from !== undefined && dto.to !== undefined) {
@@ -460,16 +480,18 @@ export class BookingsService {
     const accountingChanged =
       dto.baseFare !== undefined || dto.discount !== undefined || dto.taxRate !== undefined || dto.taxAmount !== undefined;
     if (accountingChanged) {
-      const baseFare = dto.baseFare ?? existing.baseFare ?? existing.amount ?? 0;
-      const discount = dto.discount ?? existing.discount ?? 0;
-      const taxRate = dto.taxRate ?? existing.taxRate ?? 0;
+      // Existing rows come back as Prisma Decimal objects, whose valueOf() is a string, so the
+      // fallback values must be coerced before any arithmetic or comparison.
+      const baseFare = toNumber(dto.baseFare ?? existing.baseFare ?? existing.amount);
+      const discount = toNumber(dto.discount ?? existing.discount);
+      const taxRate = toNumber(dto.taxRate ?? existing.taxRate);
       if (dto.baseFare !== undefined) data.baseFare = dto.baseFare;
       if (dto.discount !== undefined) data.discount = dto.discount;
       if (dto.taxRate !== undefined) data.taxRate = dto.taxRate;
       if (dto.taxAmount !== undefined) {
         data.taxAmount = dto.taxAmount;
       } else if (dto.taxRate !== undefined || dto.baseFare !== undefined || dto.discount !== undefined) {
-        data.taxAmount = taxRate > 0 ? Math.round(Math.max(0, baseFare - discount) * (taxRate / 100) * 100) / 100 : 0;
+        data.taxAmount = percentageOf(Math.max(0, baseFare - discount), taxRate, existing.currency ?? BASE_CURRENCY);
       }
     }
 
@@ -600,12 +622,14 @@ export class BookingsService {
   // ------------------------------------------------------------------
 
   async remove(user: AuthUser, id: string) {
-    // Deleting cascades away the invoice and WhatsApp history and there is no undo, so it
-    // is an admin action. Staff should cancel a booking instead - that keeps the record.
-    if (user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
+    // Deleting cascades away the invoice and WhatsApp history and there is no undo. The route is
+    // gated by BOOKING_DELETE (MANAGER and above); this repeats the check as defence in depth,
+    // because the service is reachable from other callers and the old string comparison here was
+    // the *only* thing protecting it.
+    if (!roleHas(user.role, Permission.BOOKING_DELETE)) {
       throw new ForbiddenException({
-        message: 'Only an admin can delete a booking. Cancel it instead to keep the record.',
-        code: 'DELETE_REQUIRES_ADMIN',
+        message: 'Your role cannot delete bookings. Cancel the booking instead to keep the record.',
+        code: 'DELETE_REQUIRES_MANAGER',
       });
     }
     const existing = await this.prisma.booking.findFirst({
@@ -613,6 +637,12 @@ export class BookingsService {
     });
     if (!existing) {
       throw new BadRequestException({ message: 'Booking not found', code: 'BOOKING_NOT_FOUND' });
+    }
+    if (existing.invoiceNumber) {
+      throw new BadRequestException({
+        message: 'Cannot delete a booking with an issued tax invoice. Please cancel the booking instead to maintain regulatory audit records.',
+        code: 'ISSUED_INVOICE_DELETE_BLOCKED',
+      });
     }
     await this.automation.syncForBookingCancel(id);
     await this.prisma.booking.delete({ where: { id } });
@@ -630,8 +660,6 @@ export class BookingsService {
     const nowLocal = DateTime.now().setZone(tz);
     const startOfToday = nowLocal.startOf('day').toUTC().toJSDate();
     const endOfToday = nowLocal.plus({ days: 1 }).startOf('day').toUTC().toJSDate();
-    const startOfWeek = nowLocal.startOf('week').toUTC().toJSDate();
-    void startOfWeek;
 
     const [total, today, upcoming, pending, cancelled] = await Promise.all([
       this.prisma.booking.count({ where: { businessId: user.businessId } }),

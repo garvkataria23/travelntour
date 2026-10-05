@@ -113,7 +113,7 @@ export class WhatsAppService {
     const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
     if (!response.ok) {
-      this.throwMetaError(body);
+      this.throwMetaError(body, response.status, response.headers);
     }
 
     const messages = body.messages as Array<{ id: string }> | undefined;
@@ -166,7 +166,7 @@ export class WhatsAppService {
 
     const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     if (!response.ok) {
-      this.throwMetaError(body);
+      this.throwMetaError(body, response.status, response.headers);
     }
 
     const messages = body.messages as Array<{ id: string }> | undefined;
@@ -208,7 +208,7 @@ export class WhatsAppService {
       });
       uploadBody = (await uploadRes.json().catch(() => ({}))) as Record<string, unknown>;
       if (!uploadRes.ok) {
-        this.throwMetaError(uploadBody);
+        this.throwMetaError(uploadBody, uploadRes.status, uploadRes.headers);
       }
     } catch (error) {
       if (error instanceof WhatsAppApiError) throw error;
@@ -254,7 +254,7 @@ export class WhatsAppService {
 
     const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     if (!response.ok) {
-      this.throwMetaError(body);
+      this.throwMetaError(body, response.status, response.headers);
     }
 
     const messages = body.messages as Array<{ id: string }> | undefined;
@@ -265,15 +265,22 @@ export class WhatsAppService {
     return { waMessageId };
   }
 
-  private throwMetaError(body: Record<string, unknown>): never {
+  private throwMetaError(body: Record<string, unknown>, httpStatus?: number, headers?: Headers): never {
     const error = body.error as Record<string, unknown> | undefined;
     const subcode = error?.error_subcode as number | undefined;
     const codeRaw = Number(error?.code) || Number(subcode);
-    const mapped = META_ERROR_CODES[codeRaw] ?? {
-      code: 'TEMPORARY_ERROR',
-      retryable: true,
-    };
-    const message = (error?.message as string) || 'WhatsApp API request failed';
-    throw new WhatsAppApiError(mapped.code, message, mapped.retryable, codeRaw);
+    const isMetaRateLimit = codeRaw === 470 || codeRaw === 130429 || codeRaw === 131008 || httpStatus === 429;
+    const isServerError = httpStatus !== undefined && httpStatus >= 500 && httpStatus <= 504;
+
+    const mapped = META_ERROR_CODES[codeRaw];
+    const retryable = mapped ? mapped.retryable : (isMetaRateLimit || isServerError);
+    const code = mapped ? mapped.code : (isMetaRateLimit ? 'RATE_LIMIT' : (isServerError ? 'TEMPORARY_ERROR' : 'API_ERROR'));
+
+    let message = (error?.message as string) || 'WhatsApp API request failed';
+    const retryAfter = headers?.get?.('retry-after');
+    if (retryAfter) {
+      message += ` (Retry-After: ${retryAfter}s)`;
+    }
+    throw new WhatsAppApiError(code, message, retryable, codeRaw || httpStatus);
   }
 }

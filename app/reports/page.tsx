@@ -85,14 +85,23 @@ const TABS = ["Overview", "Bookings", "Revenue", "Customers", "Communication", "
 type Tab = (typeof TABS)[number];
 
 interface BookingExportItem {
+  id?: string;
   pnr?: string;
+  airline?: string | null;
+  flightNumber?: string | null;
   fromAirport?: string | null;
   toAirport?: string | null;
   amount?: number | null;
+  cost?: number | null;
+  currency?: string | null;
   status?: string;
+  paymentStatus?: string;
+  paidAmount?: number | null;
   source?: string;
   departureDate?: string;
-  customer?: { name?: string } | null;
+  createdAt?: string;
+  customerId?: string | null;
+  customer?: { id?: string; name?: string } | null;
 }
 interface BookingExportList { items: BookingExportItem[]; meta?: { total: number } }
 
@@ -115,7 +124,7 @@ export default function ReportsPage() {
 
   const bookingsRep = useApi<BookingsReport>(`/reports/bookings${rangeQs}`);
   const revenueRep = useApi<RevenueReport>(`/reports/revenue${rangeQs}`);
-  const overviewRep = useApi<OverviewStats>("/reports/overview");
+  const overviewRep = useApi<OverviewStats>(`/reports/overview${rangeQs}`);
   const messagesRep = useApi<MessagesReport>(`/reports/messages${rangeQs}`);
   const expensesRep = useApi<ExpensesReport>(`/reports/expenses${rangeQs}`);
   const invoicesRep = useApi<InvoicesReport>(`/reports/invoices${rangeQs}`);
@@ -129,7 +138,9 @@ export default function ReportsPage() {
   const byMonth = revenueRep.data?.byMonth ?? [];
   const maxRevenue = Math.max(1, ...byMonth.map((b) => b.revenue));
 
-  const bySource = bookingsRep.data?.bySource ?? [];
+  // `?? []` inside a dependency array produced a fresh array identity on every render, so the
+  // memoised donut below was recomputed continuously and the exhaustive-deps check flagged it.
+  const bySource = useMemo(() => bookingsRep.data?.bySource ?? [], [bookingsRep.data]);
   const sourceTotal = bySource.reduce((sum, s) => sum + s.count, 0);
   const donutBg = useMemo(() => buildDonut(bySource, sourceTotal), [bySource, sourceTotal]);
 
@@ -153,12 +164,25 @@ export default function ReportsPage() {
         api<BookingExportList>(`/bookings?${qParams.toString()}`).catch(() => ({ items: [] })),
         api<{ items: any[]; stats?: any }>(`/invoices?${qParams.toString()}`).catch(() => ({ items: [] })),
         api<{ items: any[] }>(`/expenses?${qParams.toString()}`).catch(() => ({ items: [] })),
-        api<{ items: any[] }>(`/income?${qParams.toString()}`).catch(() => ({ items: [] })),
+        api<{ items: any[] }>(`/incomes?${qParams.toString()}`).catch(() => ({ items: [] })),
       ]);
 
       const ov = overviewRep.data?.stats;
       const invStats = invoicesRep.data;
       const curr = revenueRep.data?.currency || "AED";
+
+      const spentByCustomer = new Map<string, number>();
+      const dueByCustomer = new Map<string, number>();
+      for (const b of (bookingsRes.items ?? [])) {
+        const cName = b.customer?.name;
+        const cId = b.customerId || cName;
+        if (cId) {
+          const amt = Number(b.amount || 0);
+          const paid = Number(b.paidAmount || 0);
+          spentByCustomer.set(cId, (spentByCustomer.get(cId) ?? 0) + amt);
+          dueByCustomer.set(cId, (dueByCustomer.get(cId) ?? 0) + Math.max(0, amt - paid));
+        }
+      }
 
       const excelBlob = generateFinancialReportExcel({
         businessName: "FlyConnect Travel Agency",
@@ -242,8 +266,8 @@ export default function ReportsPage() {
           name: c.name,
           phone: c.phone,
           bookingsCount: c.bookings || 0,
-          totalSpent: 0,
-          totalDue: 0,
+          totalSpent: spentByCustomer.get(c.id) ?? spentByCustomer.get(c.name) ?? 0,
+          totalDue: dueByCustomer.get(c.id) ?? dueByCustomer.get(c.name) ?? 0,
         })),
       });
 

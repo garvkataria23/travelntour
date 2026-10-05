@@ -1,30 +1,26 @@
-import { BadRequestException, Body, Controller, Get, Patch } from '@nestjs/common';
+import { Body, Controller, Get, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
-import { AuditService } from '../audit/audit.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
-import { Roles } from '../common/roles.decorator';
-import { PrismaService } from '../prisma/prisma.service';
+import { Permission } from '../common/permissions';
+import { RequirePermissions } from '../common/permissions.decorator';
 import { UpdateBusinessDto } from './dto/update-business.dto';
 import { BusinessesService } from './businesses.service';
 
 @ApiTags('businesses')
 @ApiBearerAuth()
-@Roles(Role.ADMIN, Role.SUPER_ADMIN)
 @Controller('business')
 export class BusinessesController {
-  constructor(
-    private readonly businessesService: BusinessesService,
-    private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
-  ) {}
+  // PrismaService and AuditService were injected and never used here; the service layer owns both.
+  constructor(private readonly businessesService: BusinessesService) {}
 
   @Get()
+  @RequirePermissions(Permission.SETTINGS_VIEW)
   profile(@CurrentUser() user: AuthUser) {
     return this.businessesService.profile(user.businessId);
   }
 
   @Patch()
+  @RequirePermissions(Permission.BUSINESS_MANAGE)
   update(@CurrentUser() user: AuthUser, @Body() dto: UpdateBusinessDto) {
     return this.businessesService.update(user, dto);
   }

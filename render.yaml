@@ -1,15 +1,26 @@
 services:
   - type: web
-    name: flyconnect-api-fallback
+    name: flyconnect-backend-fallback
     runtime: node
-    plan: free
+    # The free plan spins this instance down when idle and restarts it whenever the health check
+    # returns non-200. For a disaster-recovery fallback that is the wrong trade: the primary path
+    # would have to survive a cold start. Use a paid instance.
+    plan: starter
     region: singapore
     rootDir: backend
     buildCommand: npm ci && npx prisma generate && npm run build
-    startCommand: npx prisma migrate deploy && node dist/main
-    healthCheckPath: /api/health
+    # Migrations run once per deploy, not on every container start. Chaining them into
+    # startCommand meant every cold start raced the Prisma migration lock, and a failed
+    # migration meant the API never came up at all.
+    preDeployCommand: npx prisma migrate deploy
+    startCommand: node dist/main
+    # /api/health reports Redis and Postgres reachability. It must not gate on either: a brief
+    # Redis blip would otherwise restart the fallback while the primary is the one serving traffic.
+    healthCheckPath: /api/live
     envVars:
       - key: NODE_ENV
+        value: production
+      - key: APP_ENV
         value: production
       - key: FRONTEND_URL
         value: https://travel-omega-ashy.vercel.app,https://129.159.16.165.sslip.io
@@ -18,16 +29,41 @@ services:
       - key: REDIS_URL
         sync: false
       - key: JWT_SECRET
-        generateValue: true
+        sync: false
       - key: JWT_REFRESH_SECRET
-        generateValue: true
+        sync: false
       - key: JWT_EXPIRES_IN
         value: 15m
       - key: JWT_REFRESH_EXPIRES_IN
         value: 7d
       - key: ALLOW_PUBLIC_REGISTRATION
         value: "false"
+      # This instance exists to take over from the primary, so it must be able to send real
+      # WhatsApp messages. WHATSAPP_MOCK=true previously meant a failover would silently discard
+      # every message while reporting success.
       - key: WHATSAPP_MOCK
-        value: "true"
+        value: "false"
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_META_APP_ID
+        sync: false
+      - key: WHATSAPP_META_APP_SECRET
+        sync: false
+      - key: WHATSAPP_WEBHOOK_APP_SECRET
+        sync: false
+      # Required in production. Previously unset, which meant the webhook handshake accepted a
+      # token published in the repository and every signed POST was rejected.
+      - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_API_VERSION
+        value: v21.0
       - key: CURRENCY_BASE
         value: AED
+      - key: CURRENCY_PRIMARY_URL
+        value: https://api.exchangerate.fun/latest?base=
+      - key: CURRENCY_TTL_SECONDS
+        value: "3300"
+      - key: SENTRY_DSN
+        sync: false

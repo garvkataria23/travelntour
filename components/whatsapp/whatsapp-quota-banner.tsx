@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -48,20 +48,23 @@ export function WhatsAppQuotaBanner({
   const [upgradeNotice, setUpgradeNotice] = useState("");
 
   const user = getStoredUser();
-  const isAdmin = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN" || true; // User Garv Kataria is Admin
+  // Quota is a billing control, so only the platform owner may change it. This used to include
+  // a tenant-level ADMIN, which let any agency's admin grant themselves unlimited messages by
+  // writing to localStorage. A tenant admin now sees usage only and must ask the platform owner.
+  const isPlatformOwner = user?.role === "SUPER_ADMIN";
 
   const onQuotaChangeRef = useRef(onQuotaChange);
   useEffect(() => {
     onQuotaChangeRef.current = onQuotaChange;
   }, [onQuotaChange]);
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     const q = getStoredQuota(currentApiCount);
     const s = evaluateQuotaStatus(q);
     setQuota(q);
     setStatus(s);
     onQuotaChangeRef.current?.(s);
-  };
+  }, [currentApiCount]);
 
   useEffect(() => {
     refresh();
@@ -74,7 +77,7 @@ export function WhatsAppQuotaBanner({
       window.removeEventListener("fc:whatsapp-quota-updated", handleCustomUpdate);
       window.removeEventListener("storage", handleCustomUpdate);
     };
-  }, [currentApiCount]);
+  }, [refresh]);
 
   const handleUpgrade = (newLimit: number) => {
     const s = upgradeWhatsAppLimit(newLimit, user?.name || "Garv Kataria (Admin)");
@@ -157,7 +160,7 @@ export function WhatsAppQuotaBanner({
                 Contact Admin to Upgrade
               </button>
 
-              {isAdmin && (
+              {isPlatformOwner && (
                 <button
                   type="button"
                   data-test="admin-upgrade-btn"
@@ -217,7 +220,7 @@ export function WhatsAppQuotaBanner({
                 Contact Admin to Upgrade
               </button>
 
-              {isAdmin && (
+              {isPlatformOwner && (
                 <button
                   type="button"
                   data-test="admin-upgrade-btn"
@@ -276,7 +279,7 @@ export function WhatsAppQuotaBanner({
                 Contact Admin to Upgrade
               </button>
 
-              {isAdmin && (
+              {isPlatformOwner && (
                 <button
                   type="button"
                   data-test="admin-upgrade-btn"
@@ -321,7 +324,7 @@ export function WhatsAppQuotaBanner({
                 {status.used.toLocaleString()} / {status.limit.toLocaleString()} Sent ({status.percent}%)
               </span>
 
-              {isAdmin && (
+              {isPlatformOwner && (
                 <button
                   type="button"
                   data-test="quick-upgrade-modal-trigger"

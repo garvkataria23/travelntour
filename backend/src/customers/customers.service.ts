@@ -4,6 +4,8 @@ import { AuthUser } from '../common/current-user.decorator';
 import { normalizePhone, isValidPhone } from '../common/utils';
 import { paginationMeta } from '../common/pagination';
 import { isUniqueViolation } from '../common/prisma-error';
+import { sum } from '../common/money';
+import { BASE_CURRENCY } from '../currency/decimals';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
@@ -27,8 +29,8 @@ export class CustomersService {
       order?: 'asc' | 'desc';
     },
   ) {
-    const page = Number(query.page) || 1;
-    const limit = Number(query.limit) || 20;
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(1000, Math.max(1, Number(query.limit) || 20));
     const where: Record<string, unknown> = { businessId: user.businessId };
 
     if (query.status) {
@@ -134,7 +136,12 @@ export class CustomersService {
       stats: {
         totalBookings: customer.bookings.length,
         upcomingTrips: customer.bookings.filter((b) => b.departureDate.getTime() > Date.now() && b.status !== 'CANCELLED').length,
-        totalSpent: customer.bookings.reduce((sum, b) => sum + (b.amount ?? 0), 0),
+        // Cancelled bookings are excluded from upcomingTrips but were still counted in totalSpent,
+        // which is inconsistent. Summed via money() so the Decimal values do not drift.
+        totalSpent: sum(
+          customer.bookings.filter((b) => b.status !== 'CANCELLED').map((b) => b.amount),
+          BASE_CURRENCY,
+        ),
       },
     };
   }

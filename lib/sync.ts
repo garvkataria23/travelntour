@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { getStoredUser, invalidateCache, baseOf } from "@/lib/api";
 import { db } from "@/lib/firebase";
 import {
@@ -241,20 +241,35 @@ export function useLiveSync(
 ) {
   const [lastEvent, setLastEvent] = useState<LiveSyncEvent | null>(null);
 
+  // Call sites pass a fresh inline arrow on every render. Depending on that identity directly
+  // tore down and re-created the subscription on every render, which could drop events arriving
+  // during the swap and multiplied Firestore listener churn. The callback is held in a ref so
+  // the subscription is keyed only on the entity filter.
+  const onEventRef = useRef(onEvent);
   useEffect(() => {
-    const filters = entityFilter ? (Array.isArray(entityFilter) ? entityFilter : [entityFilter]) : null;
+    onEventRef.current = onEvent;
+  });
+
+  const filters = useMemo(() => {
+    if (!entityFilter) return null;
+    const list = Array.isArray(entityFilter) ? entityFilter : [entityFilter];
+    return list.length > 0 ? list : null;
+  }, [entityFilter]);
+
+  const filterKey = filters ? filters.join(",") : "";
+
+  useEffect(() => {
+    const active = filterKey ? filterKey.split(",") as SyncEntity[] : null;
 
     const unsubscribe = subscribeToLiveSync((event) => {
-      if (!filters || filters.includes(event.entity) || event.entity === "general") {
+      if (!active || active.includes(event.entity) || event.entity === "general") {
         setLastEvent(event);
-        if (onEvent) {
-          onEvent(event);
-        }
+        onEventRef.current?.(event);
       }
     });
 
     return unsubscribe;
-  }, [entityFilter, onEvent]);
+  }, [filterKey]);
 
   return lastEvent;
 }
@@ -265,7 +280,7 @@ export function useLiveSync(
  */
 export function useLiveHighlights(entity?: SyncEntity) {
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
-  const timersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useLiveSync(entity, (event) => {
     if (event.entityId) {

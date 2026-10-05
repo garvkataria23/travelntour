@@ -1,0 +1,148 @@
+name: CI
+
+# There was no CI at all before this: nothing ran on push or PR, which is how an unlintable
+# `lint` script, six hook-dependency bugs, a forged admin cookie and a `.dockerignore` that was
+# never committed all reached main unnoticed.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (typecheck, lint, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          # NEXT_PUBLIC_* are inlined at build time. Placeholder values are fine here: the build
+          # only needs to succeed, and no real secret may be exposed to the build log.
+          NEXT_PUBLIC_API_URL: https://api.example.invalid/api
+          NEXT_PUBLIC_FALLBACK_API_URL: https://fallback.example.invalid/api
+
+  backend:
+    name: Backend (typecheck, lint, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify migration history matches the schema
+        # A schema/migration drift (an index present in one and not the other) silently generates
+        # a spurious DROP INDEX on the next `migrate dev`. This catches it before it ships.
+        run: npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "file:./ci-shadow.db" --exit-code
+        env:
+          DATABASE_URL: file:./ci.db
+
+  firestore-rules:
+    name: Firestore rules compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate firestore.rules and firestore.indexes.json parse
+        # The rules previously rejected 100% of booking and backup writes while both call sites
+        # swallowed the error, so nothing surfaced the mismatch. Compiling them in CI is the
+        # cheapest guard against that class of bug returning.
+        run: |
+          npx --yes firebase-tools@13 --version
+          npx --yes firebase-tools@13 emulators:exec --only firestore \
+            --project demo-travelntour "echo 'rules compiled'" --non-interactive
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          GCLOUD_PROJECT: demo-travelntour
+
+  docker:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Proves the .dockerignore is committed and actually excludes the nested .env files. A build
+      # that silently copied backend/.env into an image layer is possible when .dockerignore is
+      # missing or uses the non-recursive `.env*` form.
+      - name: Verify no env file reaches the build context
+        run: |
+          set -euo pipefail
+          test -f .dockerignore || { echo "::error::.dockerignore is not committed"; exit 1; }
+          test -f backend/.dockerignore || { echo "::error::backend/.dockerignore is not committed"; exit 1; }
+          grep -q '\*\*/\.env' .dockerignore || {
+            echo "::error::.dockerignore must exclude env files recursively (**/.env*), otherwise backend/.env is copied into the image"
+            exit 1
+          }
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: false
+          tags: flyconnect-backend:ci
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: flyconnect-frontend:ci
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://api.example.invalid/api
+            NEXT_PUBLIC_FALLBACK_API_URL=https://fallback.example.invalid/api

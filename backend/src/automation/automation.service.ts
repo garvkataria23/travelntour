@@ -3,9 +3,8 @@ import { AutomationRule, Booking, Customer, MessageType } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/current-user.decorator';
-import { paginationMeta } from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
-import { getQueues } from '../queue/queue.module';
+import { enqueueSendJob, getQueues } from '../queue/queue.module';
 import { CreateRuleDto } from './dto/create-rule.dto';
 import { UpdateRuleDto } from './dto/update-rule.dto';
 
@@ -220,20 +219,8 @@ export class AutomationService {
     const queues = getQueues();
     const jobs: Array<{ scheduledMessageId: string; jobId: string; delayMs: number }> = [];
     for (const message of saved) {
-      const jobId = `sm_${message.id}`;
       const delayMs = Math.max(0, message.scheduledAt.getTime() - Date.now());
-      await queues.whatsappQueue.add(
-        'send',
-        { scheduledMessageId: message.id },
-        {
-          jobId,
-          delay: delayMs,
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5000 },
-          removeOnComplete: true,
-          removeOnFail: false,
-        },
-      );
+      const jobId = await enqueueSendJob(queues.whatsappQueue, message.id, { delay: delayMs });
       await this.prisma.scheduledMessage.update({
         where: { id: message.id },
         data: { bullmqJobId: jobId },

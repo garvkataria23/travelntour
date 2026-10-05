@@ -8,7 +8,7 @@ import { useCurrency } from "@/lib/currency";
 import { formatDate } from "@/lib/api";
 
 const QUICK_AMOUNTS = [100, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000];
-const POPULAR = ["AED", "INR", "USD", "EUR", "GBP", "PKR", "SAR", "AED"];
+const POPULAR = ["AED", "USD", "EUR", "GBP", "INR", "SAR", "QAR", "KWD", "OMR", "BHD", "CAD", "AUD", "SGD", "JPY", "PKR", "BDT"];
 const MAX_RATE_DIGITS = 6;
 
 function rateDigits(rate: number): number {
@@ -40,10 +40,17 @@ export default function CurrencyPage() {
   const term = query.trim().toLowerCase();
   const tableRows = useMemo(() => {
     return Object.entries(rates?.rates ?? {})
-      .map(([code, rateValue]) => ({ code, rate: rateValue }))
-      .filter((row) => !term || row.code.toLowerCase().includes(term))
+      .map(([code, rateValue]) => {
+        const option = options.find((opt) => opt.code === code);
+        return {
+          code,
+          name: option?.name ?? code,
+          rate: rateValue,
+        };
+      })
+      .filter((row) => !term || row.code.toLowerCase().includes(term) || row.name.toLowerCase().includes(term))
       .sort((a, b) => a.code.localeCompare(b.code));
-  }, [rates, term]);
+  }, [rates, term, options]);
 
   const swap = () => {
     setFrom(to);
@@ -57,7 +64,7 @@ export default function CurrencyPage() {
           <div>
             <h1 className="text-[26px] font-extrabold tracking-tight text-[#071333]">Currency Converter</h1>
             <p className="text-sm text-[#5b6a86]">
-              Live rates for {Object.keys(rates?.rates ?? {}).length || "—"} currencies. Amounts are stored in {base} and converted for display.
+              Live rates for {Object.keys(rates?.rates ?? {}).length || options.length} global currencies. Amounts are stored in {base} and converted for display.
             </p>
           </div>
           <button
@@ -129,23 +136,21 @@ export default function CurrencyPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {POPULAR.map((code, index) =>
-                  index === POPULAR.length - 1 ? null : (
-                    <button
-                      key={code}
-                      type="button"
-                      onClick={() => {
-                        setTo(code);
-                        setDisplay(code);
-                      }}
-                      className={`rounded-lg border px-2.5 py-1 text-[12px] font-bold transition ${
-                        to === code ? "border-[#1688f9] bg-[#eef6ff] text-[#1688f9]" : "border-[#dde7f3] bg-white text-[#3d4d6b] hover:border-[#1688f9]"
-                      }`}
-                    >
-                      {code}
-                    </button>
-                  ),
-                )}
+                {POPULAR.map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => {
+                      setTo(code);
+                      setDisplay(code);
+                    }}
+                    className={`rounded-lg border px-2.5 py-1 text-[12px] font-bold transition ${
+                      to === code ? "border-[#1688f9] bg-[#eef6ff] text-[#1688f9]" : "border-[#dde7f3] bg-white text-[#3d4d6b] hover:border-[#1688f9]"
+                    }`}
+                  >
+                    {code}
+                  </button>
+                ))}
               </div>
             </div>
           </SectionCard>
@@ -188,8 +193,8 @@ export default function CurrencyPage() {
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search by code…"
-                className="h-10 w-full rounded-lg border border-[#e2eaf5] pl-9 pr-3 text-[13px] outline-none focus:border-[#1688f9] sm:max-w-[280px]"
+                placeholder="Search by code or currency name (e.g. USD, Euro, Rupee, Dinar)…"
+                className="h-10 w-full rounded-lg border border-[#e2eaf5] pl-9 pr-3 text-[13px] outline-none focus:border-[#1688f9] sm:max-w-[340px]"
               />
             </div>
             <div className="max-h-[420px] overflow-y-auto">

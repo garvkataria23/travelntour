@@ -5,7 +5,7 @@ import { StatCard } from "@/components/dashboard/ui";
 import { useApi } from "@/lib/hooks";
 import { useLiveHighlights } from "@/lib/sync";
 import { api, formatCurrency } from "@/lib/api";
-import { useDisplayCurrency } from "@/lib/currency";
+import { useCurrency, useDisplayCurrency } from "@/lib/currency";
 import { FormEvent, useState } from "react";
 import { Banknote, CalendarDays, Plus, Search, Trash2, TrendingUp, Wallet, X } from "lucide-react";
 
@@ -24,7 +24,7 @@ interface IncomeRow {
 interface IncomeList {
   items: IncomeRow[];
   meta: { page: number; limit: number; total: number; pages: number };
-  summary: { total: number; count: number; byCategory: Array<{ category: string; total: number; count: number }> };
+  summary: { total: number; count: number; currency?: string; byCategory: Array<{ category: string; total: number; count: number }> };
 }
 
 const CATEGORY_META: Record<IncomeRow["category"], { label: string; cls: string }> = {
@@ -60,11 +60,12 @@ export default function IncomePage() {
     }
   }
 
+  const incCurr = list.data?.summary.currency;
   const statCards = [
-    { title: "Total Income", value: list.data ? formatCurrency(list.data.summary.total) : "—", icon: Wallet, tone: "blue", sub: `${list.data?.summary.count ?? 0} records` },
-    { title: "Commission", value: list.data ? formatCurrency(pick("COMMISSION")) : "—", icon: TrendingUp, tone: "purple", sub: "earned commission" },
-    { title: "Ticket Sales", value: list.data ? formatCurrency(pick("TICKET_SALE")) : "—", icon: Banknote, tone: "orange", sub: "manual ticket income" },
-    { title: "Other Income", value: list.data ? formatCurrency(pick("OTHER") + pick("REFUND")) : "—", icon: Wallet, tone: "rose", sub: "miscellaneous" },
+    { title: "Total Income", value: list.data ? formatCurrency(list.data.summary.total, incCurr) : "—", icon: Wallet, tone: "blue", sub: `${list.data?.summary.count ?? 0} records` },
+    { title: "Commission", value: list.data ? formatCurrency(pick("COMMISSION"), incCurr) : "—", icon: TrendingUp, tone: "purple", sub: "earned commission" },
+    { title: "Ticket Sales", value: list.data ? formatCurrency(pick("TICKET_SALE"), incCurr) : "—", icon: Banknote, tone: "orange", sub: "manual ticket income" },
+    { title: "Other Income", value: list.data ? formatCurrency(pick("OTHER") + pick("REFUND"), incCurr) : "—", icon: Wallet, tone: "rose", sub: "miscellaneous" },
   ];
 
   return (
@@ -148,9 +149,11 @@ export default function IncomePage() {
 }
 
 function AddIncomeModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { base, options: currencyOptions } = useCurrency();
   const [category, setCategory] = useState<IncomeRow["category"]>("COMMISSION");
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState(base || "AED");
   const [reference, setReference] = useState("");
   const [receivedOn, setReceivedOn] = useState("");
   const [note, setNote] = useState("");
@@ -171,6 +174,7 @@ function AddIncomeModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
           category,
           title: title.trim(),
           amount: parsed,
+          currency: currency || "AED",
           reference: reference.trim() || undefined,
           note: note.trim() || undefined,
           receivedOn: receivedOn || undefined,
@@ -217,7 +221,31 @@ function AddIncomeModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
           </div>
           <label className="block"><span className="mb-2 block text-sm font-semibold">Title *</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Air India agent commission" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block"><span className="mb-2 block text-sm font-semibold">Amount (AED) *</span><input type="number" min="0" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="e.g. 5000" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
+            <div>
+              <span className="mb-2 block text-sm font-semibold">Amount ({currency}) *</span>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                  placeholder="e.g. 5000"
+                  className="h-11 flex-1 min-w-0 rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]"
+                />
+                <select
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value)}
+                  className="h-11 rounded-lg border border-[#d6e1ef] bg-[#f8fafc] px-2 text-xs font-bold text-slate-800 outline-none focus:border-[#1688f9]"
+                >
+                  {currencyOptions.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.code}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
             <label className="block"><span className="mb-2 block text-sm font-semibold">Reference</span><input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="e.g. PNR / invoice no" className="h-11 w-full rounded-lg border border-[#d6e1ef] px-3 text-sm outline-none focus:border-[#1688f9]" /></label>
           </div>
           <label className="block"><span className="mb-2 block text-sm font-semibold">Date Received</span><span className="relative flex h-11 items-center gap-2 rounded-lg border border-[#d6e1ef] px-3"><CalendarDays className="h-4 w-4 text-[#65728a]" /><input type="date" value={receivedOn} onChange={(event) => setReceivedOn(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm outline-none" /><span className="text-xs text-[#65728a]">defaults to today</span></span></label>

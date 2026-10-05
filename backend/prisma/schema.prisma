@@ -9,6 +9,7 @@ datasource db {
 
 enum Role {
   ADMIN
+  MANAGER
   STAFF
   SUPER_ADMIN
 }
@@ -18,9 +19,28 @@ enum UserStatus {
   INACTIVE
 }
 
+enum BackupStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  /// Nothing to archive (a tenant with no records yet), or Drive is not configured.
+  SKIPPED
+}
+
+enum BackupTrigger {
+  MANUAL
+  SCHEDULED
+  /// Automatic archive taken immediately before a destructive restore.
+  PRE_RESTORE
+}
+
 enum BusinessStatus {
   ACTIVE
   SUSPENDED
+  /// Revoked by the platform owner. AuthService.issueSession already refuses to issue a session
+  /// for any business whose status is not ACTIVE, so this is enforced server-side.
+  BLOCKED
 }
 
 enum CustomerStatus {
@@ -120,6 +140,16 @@ model Business {
   currency String         @default("AED")
   status   BusinessStatus @default(ACTIVE)
 
+  // Platform-owner controls. These used to live in the browser (localStorage) where any user
+  // could edit them; they are server-enforced from now on.
+  blockedAt            DateTime?
+  blockedReason        String?
+  blockedById          String?
+  /// Monthly outbound WhatsApp message ceiling. Null means "use the platform default".
+  whatsappMonthlyLimit Int?
+  notes                String?
+  plan                 String?
+
   users             User[]
   customers         Customer[]
   bookings          Booking[]
@@ -132,6 +162,7 @@ model Business {
   whatsappAccounts  WhatsAppAccount[]
   auditLogs         AuditLog[]
   invoiceDocuments  InvoiceDocument[]
+  backupRuns        BackupRun[]
   setting           BusinessSetting?
 
   createdAt DateTime @default(now())
@@ -158,6 +189,7 @@ model User {
   incomes        Income[]
   refreshTokens  RefreshToken[]
   auditLogs      AuditLog[]
+  backupRuns     BackupRun[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -198,7 +230,13 @@ model BusinessSetting {
   notifyCancellation Boolean @default(true)
 
   gstEnabled    Boolean @default(false)
-  gstRate       Float   @default(0)
+  /// Monetary columns are Decimal(18,2), never Float.
+  ///
+  /// `Float` maps to Postgres `double precision`, which cannot represent 0.1. Summing a P&L from
+  /// thousands of such rows drifts, and that figure is exported to the accountant. Prisma's
+  /// Decimal.js objects are converted back to plain numbers at the Prisma boundary (see
+  /// src/prisma/prisma.service.ts), so application code is unaffected.
+  gstRate       Decimal @default(0) @db.Decimal(18, 4)
   gstin         String?
   taxLabel      String  @default("GST")
   invoicePrefix String  @default("INV")
@@ -234,13 +272,13 @@ model Customer {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  @@unique([businessId, phone])
-  @@index([businessId])
   // No index on (businessId, name): customer search is a case-insensitive substring
   // match, which a btree cannot serve, so the index was never used by the planner while
   // still costing storage on every row. Substring search needs a trigram index, which is
   // a deliberate choice to make if search ever gets slow enough to justify it.
+
+  @@unique([businessId, phone])
+  @@index([businessId])
 }
 
 model Booking {
@@ -265,20 +303,21 @@ model Booking {
   status BookingStatus @default(CONFIRMED)
   source BookingSource @default(DIRECT)
 
-  amount   Float?
+  /// Money. Decimal, not Float — see BusinessSetting.gstRate for why.
+  amount   Decimal? @db.Decimal(18, 2)
   currency String?
 
-  baseFare  Float? // gross fare before discount (taxable value)
-  cost      Float? // direct cost of the ticket (COGS)
-  discount  Float? // discount in the booking currency applied to baseFare
-  taxRate   Float? // GST % applied to this booking
-  taxAmount Float? // GST amount = (baseFare - discount) * taxRate/100
+  baseFare  Decimal? @db.Decimal(18, 2) // gross fare before discount (taxable value)
+  cost      Decimal? @db.Decimal(18, 2) // direct cost of the ticket (COGS)
+  discount  Decimal? @db.Decimal(18, 2) // discount in the booking currency applied to baseFare
+  taxRate   Decimal? @db.Decimal(9, 4) // GST % applied to this booking
+  taxAmount Decimal? @db.Decimal(18, 2) // GST amount = (baseFare - discount) * taxRate/100
 
   invoiceNumber   String?
   invoiceIssuedAt DateTime?
 
   paymentStatus InvoicePaymentStatus @default(UNPAID)
-  paidAmount    Float?
+  paidAmount    Decimal?             @db.Decimal(18, 2)
 
   createdBy String
   updatedBy String?
@@ -306,13 +345,14 @@ model Booking {
 }
 
 model InvoiceItem {
-  id          String @id @default(uuid())
+  id          String  @id @default(uuid())
   bookingId   String
   description String
-  quantity    Float  @default(1)
-  unitPrice   Float  @default(0)
-  amount      Float  @default(0)
-  sortOrder   Int    @default(0)
+  /// Quantity is stored to 4 places so fractional units (nights, seats, hours) stay exact.
+  quantity    Decimal @default(1) @db.Decimal(18, 4)
+  unitPrice   Decimal @default(0) @db.Decimal(18, 2)
+  amount      Decimal @default(0) @db.Decimal(18, 2)
+  sortOrder   Int     @default(0)
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
@@ -328,7 +368,7 @@ model Expense {
   category    ExpenseCategory @default(OPERATING)
   title       String
   description String?
-  amount      Float
+  amount      Decimal         @db.Decimal(18, 2)
   currency    String          @default("AED")
   payableTo   String?
   incurredOn  DateTime        @default(now())
@@ -351,7 +391,7 @@ model Income {
   category   IncomeCategory @default(OTHER)
   title      String
   note       String?
-  amount     Float
+  amount     Decimal        @db.Decimal(18, 2)
   currency   String         @default("AED")
   reference  String?
   receivedOn DateTime       @default(now())
@@ -566,10 +606,10 @@ model InvoiceDocument {
   /// Bytes rather than JSONB means the payload can no longer be queried with SQL. That
   /// is deliberate: it is a frozen audit artefact, read whole and never filtered on, and
   /// paying per-row key storage for it was the wrong trade.
-  payload Bytes
+  payload            Bytes
   /// Size of `payload` before compression, so the storage report can show the real
   /// ratio without decompressing.
-  payloadRawBytes Int
+  payloadRawBytes    Int
   /// Compressed size of `payload`, so the report can total the two artefacts without
   /// reading every blob. Kept separate from `storedBytes`, which is the PDF column only.
   payloadStoredBytes Int
@@ -592,4 +632,98 @@ model InvoiceDocument {
   @@index([businessId, invoiceNumber])
   /// Supports the retention sweep, which only ever looks at unpruned old rows.
   @@index([prunedAt, createdAt])
+}
+
+/// One row per attempt to archive a tenant's data.
+///
+/// Backups used to be a JSON body streamed to the browser and discarded, or a file uploaded by a
+/// human from a personal Google Drive. There was no record of whether one ever succeeded, no
+/// scheduler, and nothing to restore from. This table is that record; it is the difference between
+/// "we think we have backups" and being able to prove it.
+model BackupRun {
+  id         String  @id @default(uuid())
+
+  /// Null for a platform-wide run that archives every tenant in one archive.
+  businessId String?
+
+  trigger BackupTrigger @default(MANUAL)
+  status  BackupStatus  @default(PENDING)
+
+  format     String  @default("json")
+  fileName   String?
+  driveFileId String?
+  driveWebViewLink String?
+  sizeBytes  BigInt?
+  sha256     String?
+
+  /// Row counts per collection, so an operator can tell a complete archive from a partial one
+  /// without downloading and opening it.
+  recordCounts Json?
+
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  errorMessage String?
+
+  triggeredById String?
+
+  business    Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  triggeredBy User?     @relation(fields: [triggeredById], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@index([status])
+  @@index([startedAt])
+  @@index([businessId, startedAt])
+}
+
+/// The Drive credential a backup destination authenticates with.
+///
+/// TWO SHAPES OF DESTINATION, ONE TABLE
+///
+/// `kind = SERVICE_ACCOUNT` - unattended. The key comes from the environment and this row only
+/// records metadata. This is the right choice for a Workspace install, but a service account has
+/// no Drive storage quota of its own: it can create file metadata but cannot upload content into
+/// a personal Drive folder, so this shape only works against a Shared Drive.
+///
+/// `kind = USER_OAUTH` - the operator's own Google account (often a dedicated backups-only
+/// address). The account's Drive quota is used, so this works on a free consumer account. The
+/// refresh token is stored ENCRYPTED: it grants full access to that Drive, so plaintext at rest
+/// would be a worse compromise than the backup is worth.
+///
+/// Never more than one row per `kind`: whichever was connected last is the active destination.
+/// `status` records whether it still works, because a revoked refresh token looks configured
+/// until a backup actually fails.
+model BackupDestination {
+  id     String @id @default(uuid())
+  kind   String
+
+  /// Google account behind the credential. For USER_OAUTH this is the address that was signed in,
+  /// shown in the console so an operator can tell at a glance which account holds the archives.
+  accountEmail String
+
+  /// Encrypted refresh token (USER_OAUTH only). Ciphertext, never plaintext:
+  /// version.iv.authTag.ciphertext, all base64url. Null for a service account.
+  refreshTokenCiphertext String?
+
+  /// Folder the archives live in.
+  folderId String?
+
+  status BackupDestinationStatus @default(ACTIVE)
+
+  connectedAt DateTime  @default(now())
+  /// Last successful token refresh or Drive call. Null until it has been used once.
+  lastUsedAt   DateTime?
+  /// Why it stopped working, when it did. Surfaced in the console so an operator learns about a
+  /// revoked credential from the UI instead of from a silently missed backup.
+  errorMessage String?
+
+  @@index([kind])
+  @@index([status])
+}
+
+enum BackupDestinationStatus {
+  ACTIVE
+  /// The credential no longer works - revoked, expired, or the folder was unshared. Backups will
+  /// fail until an operator reconnects. Kept rather than deleted so the history of what the
+  /// destination was is not lost.
+  BROKEN
 }

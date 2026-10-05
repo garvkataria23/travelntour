@@ -91,16 +91,167 @@ export function formatMoney(
 // ---------------------------------------------------------------------------
 
 export interface RateTable {
-  base: string;
+base: string;
   rates: Record<string, number>;
   asOf: string;
   fetchedAt: string;
   source: string;
   stale: boolean;
+  /**
+   * False when the rates are the compiled-in BASELINE_RATES rather than a table fetched from an
+   * exchange-rate source. The UI must not present those as current market rates.
+   */
+  live?: boolean;
 }
 
-let displayCurrency: string = BASE_CURRENCY;
-let rateTable: RateTable | null = null;
+export interface CurrencyOption {
+  code: string;
+  name: string;
+  fiat: boolean;
+  digits: 0 | 2 | 3;
+}
+
+export const DISPLAY_KEY = "fc_display_currency";
+export const RATES_STORAGE_KEY = "fc_cached_rate_table";
+
+/** Known standard currency names used as reliable fallback */
+const COMMON_NAMES: Record<string, string> = {
+  AED: "United Arab Emirates Dirham",
+  USD: "US Dollar",
+  EUR: "Euro",
+  GBP: "British Pound",
+  INR: "Indian Rupee",
+  SAR: "Saudi Riyal",
+  QAR: "Qatari Riyal",
+  KWD: "Kuwaiti Dinar",
+  OMR: "Omani Rial",
+  BHD: "Bahraini Dinar",
+  CAD: "Canadian Dollar",
+  AUD: "Australian Dollar",
+  SGD: "Singapore Dollar",
+  JPY: "Japanese Yen",
+  PKR: "Pakistani Rupee",
+  BDT: "Bangladeshi Taka",
+  LKR: "Sri Lankan Rupee",
+  NPR: "Nepalese Rupee",
+  THB: "Thai Baht",
+  MYR: "Malaysian Ringgit",
+  CNY: "Chinese Yuan",
+  IDR: "Indonesian Rupiah",
+  PHP: "Philippine Peso",
+  VND: "Vietnamese Dong",
+  ZAR: "South African Rand",
+  BRL: "Brazilian Real",
+  RUB: "Russian Ruble",
+  TRY: "Turkish Lira",
+  NZD: "New Zealand Dollar",
+  CHF: "Swiss Franc",
+  HKD: "Hong Kong Dollar",
+  KRW: "South Korean Won",
+  SEK: "Swedish Krona",
+  NOK: "Norwegian Krone",
+  DKK: "Danish Krone",
+  PLN: "Polish Zloty",
+  EGP: "Egyptian Pound",
+  MXN: "Mexican Peso",
+  ILS: "Israeli New Shekel",
+};
+
+/** Baseline exchange rates against AED to guarantee instantaneous conversions */
+const BASELINE_RATES: Record<string, number> = {
+  AED: 1, USD: 0.2723, EUR: 0.2405, GBP: 0.2053, INR: 26.17,
+  SAR: 1.021, QAR: 0.991, KWD: 0.0837, OMR: 0.1048, BHD: 0.1026,
+  CAD: 0.385, AUD: 0.412, SGD: 0.355, JPY: 42.9, PKR: 75.44,
+  BDT: 32.4, LKR: 81.5, NPR: 41.8, THB: 9.09, MYR: 1.22,
+  CNY: 1.98, IDR: 4380, PHP: 15.6, VND: 6850, ZAR: 4.75,
+  BRL: 1.51, TRY: 9.35, NZD: 0.448, CHF: 0.233, HKD: 2.12,
+  KRW: 369.2, SEK: 2.76, NOK: 2.85, DKK: 1.80, PLN: 1.04,
+  EGP: 13.4, MXN: 5.25, ILS: 0.98,
+};
+
+let cachedDefaultCurrencies: CurrencyOption[] | null = null;
+
+export function getDefaultWorldCurrencies(): CurrencyOption[] {
+  if (cachedDefaultCurrencies) return cachedDefaultCurrencies;
+  const codes: string[] = (() => {
+    try {
+      const sup = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+      if (typeof sup === "function") {
+        return sup("currency");
+      }
+    } catch {}
+    return Object.keys(COMMON_NAMES);
+  })();
+
+  const dn = (() => {
+    try {
+      return new Intl.DisplayNames(["en"], { type: "currency" });
+    } catch {
+      return null;
+    }
+  })();
+
+  const out: CurrencyOption[] = codes.map((code) => {
+    let name = COMMON_NAMES[code];
+    if (!name && dn) {
+      try {
+        const resolved = dn.of(code);
+        if (resolved && resolved !== code) name = resolved;
+      } catch {}
+    }
+    return {
+      code,
+      name: name || code,
+      fiat: true,
+      digits: minorUnitDigits(code),
+    };
+  });
+
+  cachedDefaultCurrencies = out.sort((a, b) => a.code.localeCompare(b.code));
+  return cachedDefaultCurrencies;
+}
+
+function readStoredRates(): RateTable | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(RATES_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.rates === "object" && parsed.base) {
+      return parsed as RateTable;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+const initialStoredDisplay = readStoredDisplay();
+
+let displayCurrency: string = (initialStoredDisplay ?? BASE_CURRENCY).toUpperCase();
+/**
+ * Distinguishes "the user picked this" from "this is the business default we applied".
+ *
+ * Without this, `initDisplayCurrency` could not tell the two apart and used
+ * `displayCurrency !== BASE_CURRENCY` as a proxy, which meant that once any display currency had
+ * been applied the business default could never change again — a tenant switching its base
+ * currency silently kept rendering in the old one.
+ */
+let displayCurrencyIsUserChoice: boolean = initialStoredDisplay !== null;
+let rateTable: RateTable | null = readStoredRates() || {
+  base: BASE_CURRENCY,
+  rates: BASELINE_RATES,
+  // Previously this was stamped with `new Date().toISOString()` and `stale: false`, which meant a
+  // cold start with no network presented hardcoded, undated rates as freshly fetched, and every
+  // money figure in the app was converted with them. It is now unambiguously flagged as a
+  // non-live fallback.
+  asOf: "1970-01-01T00:00:00.000Z",
+  fetchedAt: "1970-01-01T00:00:00.000Z",
+  source: "Built-in fallback (not a live rate)",
+  stale: true,
+  live: false,
+};
+
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -131,6 +282,9 @@ export function getRateTableSnapshot(): RateTable | null {
 
 export function setDisplayCurrency(next: string): void {
   const code = (next || BASE_CURRENCY).toUpperCase();
+  // Any call from the UI is an explicit user choice, and an explicit choice must keep winning over
+  // the business default on every later load.
+  displayCurrencyIsUserChoice = true;
   if (code === displayCurrency) return;
   displayCurrency = code;
   if (typeof window !== "undefined") window.localStorage.setItem(DISPLAY_KEY, code);
@@ -138,11 +292,16 @@ export function setDisplayCurrency(next: string): void {
 }
 
 export function setRateTable(table: RateTable | null): void {
-  rateTable = table;
+  if (!table) return;
+  // A table that arrives from the API is live by definition; only the compiled-in baseline is not.
+  rateTable = { ...table, live: table.live ?? true };
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(RATES_STORAGE_KEY, JSON.stringify(rateTable));
+    } catch {}
+  }
   emit();
 }
-
-export const DISPLAY_KEY = "fc_display_currency";
 
 function readStoredDisplay(): string | null {
   if (typeof window === "undefined") return null;
@@ -153,13 +312,29 @@ function readStoredDisplay(): string | null {
   }
 }
 
-/** Seeds the display currency from storage or the business default. Called once on mount. */
+/**
+ * Seeds the display currency from storage or the business default. Called once on mount.
+ *
+ * Precedence: an explicit user choice > a stored value > the business default > the base.
+ * The business default is deliberately NOT persisted — persisting it would make it
+ * indistinguishable from a user choice on the next load, and it would be lost on reload anyway
+ * because the value only ever lived in a module variable.
+ */
 export function initDisplayCurrency(businessCurrency?: string | null): void {
-  if (displayCurrency !== BASE_CURRENCY) return;
+  if (displayCurrencyIsUserChoice) return;
+
   const stored = readStoredDisplay();
-  const next = stored || businessCurrency || BASE_CURRENCY;
+  if (stored && stored.toUpperCase() !== displayCurrency) {
+    // A stored value means the user chose it in a previous session.
+    displayCurrencyIsUserChoice = true;
+    displayCurrency = stored.toUpperCase();
+    emit();
+    return;
+  }
+
+  const next = (businessCurrency || BASE_CURRENCY).toUpperCase();
   if (next !== displayCurrency) {
-    displayCurrency = next.toUpperCase();
+    displayCurrency = next;
     emit();
   }
 }
@@ -182,14 +357,56 @@ export function rateBetween(from: string, to: string): number | null {
 }
 
 /**
+ * True when a conversion between the two currencies is currently possible.
+ *
+ * Callers use this to avoid presenting an unconverted amount as if it were in the target
+ * currency. See `formatConverted` for the user-visible behaviour.
+ */
+export function hasRate(from: string, to: string): boolean {
+  return rateBetween(from, to) !== null;
+}
+
+/** True when the current rate table is the built-in fallback rather than fetched market rates. */
+export function ratesAreLive(): boolean {
+  return rateTable?.live !== false;
+}
+
+/**
  * Converts an amount between currencies synchronously.
  *
- * Falls back to the unconverted value when rates are not loaded yet or the pair is
- * unavailable, so a number is always shown - just possibly not yet in the chosen currency.
+ * NOTE: when no rate is available this returns the input unchanged. That value is NOT in `to`.
+ * Callers must not present it as though it were — use `formatConverted`, which marks the amount,
+ * or check `hasRate` first.
  */
 export function convertAmount(value: number, to: string, from: string = BASE_CURRENCY): number {
   const num = Number(value);
   if (!Number.isFinite(num)) return 0;
   const rate = rateBetween(from, to);
   return rate === null ? num : num * rate;
+}
+
+/**
+ * Formats an amount converted into `to`, making the fallback explicit.
+ *
+ * When the rate table has no rate for the pair, the amount is rendered in its SOURCE currency
+ * with a `≈` marker instead of being labelled with the target currency's symbol. Previously the
+ * unconverted number was rendered with the target currency's symbol and no marker, so an AED
+ * 12,450 invoice displayed as "US$ 12,450" whenever the rate table failed to load — a silent
+ * financial misstatement.
+ */
+export function formatConverted(
+  value: number | null | undefined,
+  to: string = BASE_CURRENCY,
+  from: string = BASE_CURRENCY,
+): string {
+  const toCode = (to || BASE_CURRENCY).toUpperCase();
+  const fromCode = (from || BASE_CURRENCY).toUpperCase();
+  const rate = rateBetween(fromCode, toCode);
+
+  if (rate === null) {
+    if (fromCode === toCode) return formatMoney(value, toCode);
+    const amount = formatMoney(value, fromCode);
+    return `≈ ${amount} ${fromCode}`;
+  }
+  return formatMoney(convertAmount(value as number, toCode, fromCode), toCode);
 }

@@ -33,6 +33,48 @@ export function getQueues(): Queues {
 
 export const QUEUE_SERVICE = Symbol('QUEUE_SERVICE');
 
+/**
+ * Single entry point for scheduling a WhatsApp send.
+ *
+ * The jobId must change on every (re)enqueue. BullMQ silently ignores an add() whose jobId
+ * already exists, so reusing a stable id meant `retry()` flipped the row back to SCHEDULED and
+ * returned success while the previously failed job sat in Redis — the message was never sent.
+ */
+export async function enqueueSendJob(
+  queue: Queue,
+  scheduledMessageId: string,
+  options: { delay?: number; sequence?: number } = {},
+): Promise<string> {
+  const { delay = 0, sequence = 0 } = options;
+  const jobId = `sm_${scheduledMessageId}_s${sequence}`;
+
+  // Drop the previous job (if any) so the old id cannot swallow this enqueue and so
+  // failed jobs do not accumulate in Redis forever (they are enqueued with removeOnFail: false).
+  for (const candidate of [jobId, `sm_${scheduledMessageId}`]) {
+    try {
+      const existing = await queue.getJob(candidate);
+      if (existing) await existing.remove();
+    } catch {
+      // A job that is currently locked by an active worker cannot be removed; it will finish
+      // and be discarded. Not fatal for the enqueue itself.
+    }
+  }
+
+  await queue.add(
+    'send',
+    { scheduledMessageId },
+    {
+      jobId,
+      delay,
+      attempts: MAX_SEND_ATTEMPTS,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: true,
+      removeOnFail: true,
+    },
+  );
+  return jobId;
+}
+
 const queueProvider: Provider = {
   provide: QUEUE_SERVICE,
   useFactory: (): Queues => {

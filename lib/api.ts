@@ -1,6 +1,6 @@
 "use client";
 
-import { BASE_CURRENCY, convertAmount, formatMoney, getDisplayCurrency } from "@/lib/currency-core";
+import { BASE_CURRENCY, formatConverted, getDisplayCurrency } from "@/lib/currency-core";
 
 export const PRIMARY_API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "https://129.159.16.165.sslip.io/api";
@@ -17,19 +17,34 @@ export function setActiveApiBase(url: string): void {
   API_BASE = url;
 }
 
+/** Mirrors the backend's Prisma Role enum. Was `string`, so no role comparison was type-checked. */
+export type AppRole = "ADMIN" | "MANAGER" | "STAFF" | "SUPER_ADMIN";
+
 export interface ApiUser {
   id: string;
   name: string;
   email: string;
-  role: string;
+  role: AppRole;
   phone?: string | null;
   businessId?: string;
+  /**
+   * Capabilities granted to this user, from `GET /auth/me`. The UI gates navigation and actions off
+   * this list rather than off `role`, so the frontend and the API cannot drift apart. Never stored
+   * anywhere the user can edit — it is only ever written from a signed API response.
+   */
+  permissions?: string[];
 }
 
 export interface ApiSession {
   accessToken: string;
   refreshToken: string;
   user: ApiUser;
+  /**
+   * Signed assertion describing the session, issued by the API. Relayed into the app's own
+   * httpOnly cookie via POST /api/session so middleware.ts can verify it server-side. Never
+   * persisted in web storage.
+   */
+  session?: string;
 }
 
 const ACCESS_KEY = "fc_access";
@@ -82,6 +97,31 @@ export function setSession(session: ApiSession, remember = true): void {
   other.removeItem(ACCESS_KEY);
   other.removeItem(REFRESH_KEY);
   other.removeItem(USER_KEY);
+  void syncSessionCookie(session.session);
+}
+
+/**
+ * Relays the API-signed session assertion into the app's httpOnly cookie.
+ *
+ * The previous mechanism was a `fc_sa` cookie written directly from page JavaScript, which any
+ * script (and any user in DevTools) could set to "1" and satisfy the /admin guard.
+ *
+ * The request is deliberately fire-and-forget: a failure here only affects the middleware's
+ * UI-level route gate, never API access, so it must never block or fail a login.
+ */
+async function syncSessionCookie(session: string | undefined): Promise<void> {
+  if (!session) return;
+  try {
+    await fetch("/api/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session }),
+      credentials: "same-origin",
+    });
+  } catch {
+    // Non-fatal: the API remains the authority. The user may be bounced to "/" by middleware,
+    // but they are not exposed to anything.
+  }
 }
 
 export function hasActiveSession(): boolean {
@@ -95,6 +135,21 @@ export function clearSession() {
     bucket.removeItem(USER_KEY);
   }
   window.localStorage.removeItem(PERSIST_KEY);
+  memCache.clear();
+  pending.clear();
+  // Also drop the server-verified session cookie, otherwise middleware keeps treating the browser
+  // as authenticated and would never bounce a logged-out user away from /admin.
+  void fetch("/api/session", { method: "DELETE", credentials: "same-origin" }).catch(() => undefined);
+  try {
+    const toRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith(CACHE_PREFIX)) toRemove.push(k);
+    }
+    for (const k of toRemove) window.localStorage.removeItem(k);
+  } catch {
+    /* ignore */
+  }
 }
 
 export class ApiError extends Error {
@@ -134,12 +189,20 @@ export function baseOf(path: string): string {
   return "/" + (seg.length >= 2 ? seg.slice(0, 2).join("/") : seg[0] ?? "root");
 }
 
+const MAX_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
+function getStorageCacheKey(path: string): string {
+  const user = getStoredUser();
+  const userPrefix = user?.id ? `${user.businessId || 'nobiz'}:${user.id}:` : "anon:";
+  return `${CACHE_PREFIX}${userPrefix}GET:${path}`;
+}
+
 function writePersistent(path: string, data: unknown): void {
   if (typeof window === "undefined") return;
   try {
     const blob = JSON.stringify({ ts: Date.now(), data });
     if (blob.length > 400000) return;
-    window.localStorage.setItem(CACHE_PREFIX + "GET:" + path, blob);
+    window.localStorage.setItem(getStorageCacheKey(path), blob);
   } catch {
     /* quota exceeded or storage unavailable */
   }
@@ -148,9 +211,13 @@ function writePersistent(path: string, data: unknown): void {
 export function getCachedGet<T>(path: string): T | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(CACHE_PREFIX + "GET:" + path);
+    const raw = window.localStorage.getItem(getStorageCacheKey(path));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { ts: number; data: T };
+    if (Date.now() - parsed.ts > MAX_CACHE_TTL) {
+      window.localStorage.removeItem(getStorageCacheKey(path));
+      return null;
+    }
     return parsed.data;
   } catch {
     return null;
@@ -163,7 +230,9 @@ function invalidate(keyPrefix: string): void {
     if (k.startsWith(mk)) memCache.delete(k);
   }
   if (typeof window === "undefined") return;
-  const lp = CACHE_PREFIX + mk;
+  const user = getStoredUser();
+  const userPrefix = user?.id ? `${user.businessId || 'nobiz'}:${user.id}:` : "anon:";
+  const lp = `${CACHE_PREFIX}${userPrefix}${mk}`;
   const drop: string[] = [];
   try {
     for (let i = 0; i < window.localStorage.length; i++) {
@@ -231,10 +300,12 @@ async function doFetchWithFailover(path: string, init: RequestInit): Promise<Res
     }
   }
 
+  const isGet = (init.method || "GET").toUpperCase() === "GET";
+
   if (API_BASE === PRIMARY_API_BASE) {
     try {
       const res = await fetchWithEndpoint(PRIMARY_API_BASE, path, init);
-      if (shouldFailover(null, res, init.signal)) {
+      if (isGet && shouldFailover(null, res, init.signal)) {
         console.warn(
           `[FlyConnect API] Primary server returned ${res.status}. Seamlessly failing over to Render standby (${FALLBACK_API_BASE})...`
         );
@@ -245,7 +316,7 @@ async function doFetchWithFailover(path: string, init: RequestInit): Promise<Res
       }
       return res;
     } catch (err) {
-      if (shouldFailover(err, undefined, init.signal)) {
+      if (isGet && shouldFailover(err, undefined, init.signal)) {
         console.warn(
           `[FlyConnect API] Primary server unreachable. Seamlessly failing over to Render standby (${FALLBACK_API_BASE})...`,
           err
@@ -300,11 +371,21 @@ async function tryRefresh(): Promise<boolean> {
     })
       .then(async (res) => {
         if (!res.ok) return false;
-        const json = (await res.json()) as { success: boolean; data?: ApiSession };
-        if (!json.success || !json.data) {
+        const json = (await res.json()) as { success: boolean; data?: Partial<ApiSession> };
+        if (!json.success || !json.data?.accessToken) {
           return false;
         }
-        setSession(json.data);
+        // The refresh response carries no user object. Passing it straight to setSession() wrote
+        // `undefined` into the stored user key, so getStoredUser() returned null and the app
+        // treated a successful token refresh as a logout.
+        const existingUser = getStoredUser();
+        if (!existingUser) return false;
+        setSession({
+          accessToken: json.data.accessToken,
+          refreshToken: json.data.refreshToken ?? refreshToken,
+          session: json.data.session,
+          user: existingUser,
+        });
         return true;
       })
       .catch(() => {
@@ -481,8 +562,10 @@ export async function api<T>(path: string, options: ApiRequestOptions = {}): Pro
  * row's own currency - as most call sites do - therefore stays correct even for legacy
  * rows saved in a different currency.
  *
- * When the rate table has not loaded yet the amount is rendered unconverted rather than
- * withheld, so a number is always on screen.
+ * When the rate table has no rate for the pair, the amount is rendered in its source currency
+ * with an `≈` marker rather than being labelled with the target currency's symbol. Returning the
+ * unconverted number under the target symbol was a silent financial misstatement: with the rate
+ * table unavailable, an AED 12,450 invoice displayed as "US$ 12,450".
  */
 export function formatCurrency(
   amount: number | null | undefined,
@@ -490,7 +573,7 @@ export function formatCurrency(
 ): string {
   const from = (currency || BASE_CURRENCY).toUpperCase();
   const to = getDisplayCurrency();
-  return formatMoney(convertAmount(Number(amount ?? 0), to, from), to);
+  return formatConverted(Number(amount ?? 0), to, from);
 }
 
 export function formatDate(value: string | Date | null | undefined, withTime = false): string {

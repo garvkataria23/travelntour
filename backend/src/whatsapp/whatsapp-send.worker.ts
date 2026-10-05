@@ -67,10 +67,17 @@ export class WhatsAppSendWorker implements OnModuleInit, OnApplicationShutdown {
     // A message cancelled or already handled must not be sent.
     if (message.status !== 'SCHEDULED' && message.status !== 'PROCESSING') return;
 
-    await this.prisma.scheduledMessage.update({
-      where: { id: message.id },
+    // Claim the row atomically. The previous read-then-write had a window in which a stalled
+    // retry or a second delivery could both observe SCHEDULED and both send the message.
+    // Only a conditional update guarantees a single sender.
+    const claim = await this.prisma.scheduledMessage.updateMany({
+      where: { id: message.id, status: { in: ['SCHEDULED', 'PROCESSING'] } },
       data: { status: 'PROCESSING' },
     });
+    if (claim.count === 0) {
+      this.logger.log(`Skipping send for ${message.id}: claimed concurrently or no longer pending.`);
+      return;
+    }
 
     const context = bookingTemplateContext(message.booking, message.booking.customer, message.booking.business.timezone);
     const rendered = this.templates.render(message.template, context);

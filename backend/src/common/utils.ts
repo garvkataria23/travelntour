@@ -1,3 +1,6 @@
+import { validateAndNormalizePhone } from './phone.util';
+export * from './phone.util';
+
 const AIRPORT_CITY: Record<string, { code: string; city: string }> = {
   BOM: { code: 'BOM', city: 'Mumbai' },
   DEL: { code: 'DEL', city: 'Delhi' },
@@ -51,11 +54,20 @@ export function parseAirportInput(input: string): ParsedAirport {
 const PHONE_REGEX = /^\+?[0-9]{7,15}$/;
 
 export function normalizePhone(input: string): string {
+  if (!input) return '';
+  const validated = validateAndNormalizePhone(input);
+  if (validated.isValid) {
+    return validated.normalized;
+  }
   return input.replace(/[\s\-().]/g, '');
 }
 
 export function isValidPhone(input: string): boolean {
-  return PHONE_REGEX.test(normalizePhone(input));
+  if (!input) return false;
+  const validated = validateAndNormalizePhone(input);
+  if (validated.isValid) return true;
+  // Fallback for tests or unlisted country codes adhering to E.164 length (7-15 digits)
+  return PHONE_REGEX.test(input.replace(/[\s\-().]/g, ''));
 }
 
 export function initialsOf(name: string): string {

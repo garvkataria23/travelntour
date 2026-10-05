@@ -25,7 +25,7 @@ rules_version = '2';
 //   - businessId: string (required, 1-64 chars, immutable) - Tenant business ID
 //   - email: string (required, valid email, max 120 chars) - User email address
 //   - name: string (required, 1-100 chars) - User display name
-//   - role: string (required, enum: 'ADMIN' | 'STAFF' | 'SUPER_ADMIN') - Access role
+//   - role: string (required, enum: 'ADMIN' | 'MANAGER' | 'STAFF' | 'SUPER_ADMIN') - Access role
 //   - status: string (required, enum: 'ACTIVE' | 'INACTIVE') - User status
 //   - createdAt: timestamp (optional, immutable) - Account creation timestamp
 //   - updatedAt: timestamp (optional) - Modification timestamp
@@ -162,8 +162,7 @@ service cloud.firestore {
     // Check for Super Admin privilege (custom claims or verified bootstrap email)
     function isSuperAdmin() {
       return isAuthenticated() && (
-        ('role' in request.auth.token && request.auth.token.role == 'SUPER_ADMIN') ||
-        (request.auth.token.email == 'vertexlabsx@gmail.com')
+        ('role' in request.auth.token && request.auth.token.role == 'SUPER_ADMIN')
       );
     }
 
@@ -269,7 +268,7 @@ service cloud.firestore {
         data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
         data.email is string && isValidEmail(data.email) &&
         data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
-        data.role in ['ADMIN', 'STAFF', 'SUPER_ADMIN'] &&
+        data.role in ['ADMIN', 'MANAGER', 'STAFF', 'SUPER_ADMIN'] &&
         data.status in ['ACTIVE', 'INACTIVE'] &&
         isValidOptionalTimestamp('createdAt') &&
         isValidOptionalTimestamp('updatedAt');
@@ -288,8 +287,11 @@ service cloud.firestore {
         isValidOptionalTimestamp('updatedAt');
     }
 
-    function isValidBooking(data) {
-      return hasOnlyAllowedFields(['id', 'businessId', 'customerId', 'pnr', 'airline', 'fromAirport', 'toAirport', 'departureDate', 'status', 'amount', 'currency', 'createdAt', 'updatedAt']) &&
+    // The allowlist must cover every field lib/firestore.ts actually writes. It previously omitted
+      // customerName, flightNumber and departureTime, so hasOnlyAllowedFields rejected 100% of
+      // booking writes and the rejection was silently swallowed by the caller.
+      function isValidBooking(data) {
+      return hasOnlyAllowedFields(['id', 'businessId', 'customerId', 'customerName', 'pnr', 'airline', 'flightNumber', 'fromAirport', 'toAirport', 'departureDate', 'departureTime', 'status', 'amount', 'currency', 'createdAt', 'updatedAt']) &&
         hasRequiredFields(['id', 'businessId', 'customerId', 'pnr', 'airline', 'fromAirport', 'toAirport', 'departureDate', 'status', 'amount', 'currency', 'createdAt']) &&
         data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
         data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
@@ -303,7 +305,10 @@ service cloud.firestore {
         data.amount is number && data.amount >= 0 && data.amount <= 100000000 &&
         data.currency is string && data.currency.size() >= 2 && data.currency.size() <= 10 &&
         data.createdAt is timestamp &&
-        isValidOptionalTimestamp('updatedAt');
+        isValidOptionalTimestamp('updatedAt') &&
+        (!('customerName' in data) || isValidOptionalString('customerName', 1, 200)) &&
+        (!('flightNumber' in data) || isValidOptionalString('flightNumber', 1, 20)) &&
+        (!('departureTime' in data) || isValidOptionalString('departureTime', 1, 20));
     }
 
     function isValidInvoice(data) {
@@ -345,17 +350,16 @@ service cloud.firestore {
         isValidOptionalTimestamp('updatedAt');
     }
 
-    function isValidBackup(data) {
-      return hasOnlyAllowedFields(['id', 'businessId', 'exportedAt', 'sizeBytes', 'status', 'url', 'createdAt', 'updatedAt']) &&
-        hasRequiredFields(['id', 'businessId', 'exportedAt', 'sizeBytes', 'status', 'url']) &&
-        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+    // Must match saveBackupToFirestore in lib/firestore.ts, which writes
+      // { businessId, backup, createdAt }. The previous allowlist required id/exportedAt/
+      // sizeBytes/status/url, none of which the client ever wrote, so 100% of backup writes were
+      // rejected — and both call sites swallowed the error and reported success to the user.
+      function isValidBackup(data) {
+      return hasOnlyAllowedFields(['businessId', 'backup', 'createdAt']) &&
+        hasRequiredFields(['businessId', 'backup']) &&
         data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
-        data.exportedAt is timestamp &&
-        data.sizeBytes is int && data.sizeBytes >= 0 &&
-        data.status in ['PENDING', 'COMPLETED', 'FAILED'] &&
-        isValidUrl(data.url) &&
-        isValidOptionalTimestamp('createdAt') &&
-        isValidOptionalTimestamp('updatedAt');
+        data.backup is map &&
+        data.createdAt is timestamp;
     }
 
     function isValidSyncEvent(data) {
@@ -363,7 +367,9 @@ service cloud.firestore {
         hasRequiredFields(['id', 'businessId', 'entity', 'action', 'entityId', 'authorName', 'authorEmail', 'timestamp']) &&
         data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
         data.businessId is string && data.businessId.size() >= 1 && data.businessId.size() <= 64 &&
-        data.entity in ['bookings', 'customers', 'invoices', 'expenses', 'income', 'settings', 'general'] &&
+        // 'templates' was missing, so every template mutation emitted a sync event that the rules
+        // rejected (and lib/sync.ts swallowed it), leaving template edits invisible to other tabs.
+        data.entity in ['bookings', 'customers', 'invoices', 'expenses', 'income', 'settings', 'templates', 'general'] &&
         data.action in ['CREATE', 'UPDATE', 'DELETE', 'STATUS_CHANGE'] &&
         data.entityId is string && data.entityId.size() >= 1 && data.entityId.size() <= 64 &&
         data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 100 &&
@@ -418,12 +424,7 @@ service cloud.firestore {
         isValidUser(request.resource.data) &&
         request.resource.data.uid == userId && (
           isSuperAdmin() ||
-          (isTenantAdmin(request.resource.data.businessId) && request.resource.data.role != 'SUPER_ADMIN') ||
-          (
-            isOwner(userId) &&
-            (request.resource.data.role == 'ADMIN' || request.resource.data.role == 'STAFF') &&
-            request.resource.data.status == 'ACTIVE'
-          )
+          (isTenantAdmin(request.resource.data.businessId) && request.resource.data.role != 'SUPER_ADMIN')
         );
 
       allow update: if isAuthenticated() &&
@@ -533,13 +534,12 @@ service cloud.firestore {
       allow read: if isTenantMember(resource.data.businessId);
 
       allow create: if isTenantMember(request.resource.data.businessId) &&
-        isValidBackup(request.resource.data) &&
-        request.resource.data.id == backupId;
+        isValidBackup(request.resource.data);
 
       allow update: if isTenantMember(resource.data.businessId) &&
         isTenantMember(request.resource.data.businessId) &&
         isValidBackup(request.resource.data) &&
-        areImmutableFieldsUnchanged(['id', 'businessId', 'exportedAt']);
+        areImmutableFieldsUnchanged(['businessId', 'createdAt']);
 
       allow delete: if isAuthenticated() &&
         (isTenantAdmin(resource.data.businessId) || isSuperAdmin());

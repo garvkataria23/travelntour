@@ -62,6 +62,7 @@ export class IncomeService {
       summary: {
         total: agg._sum.amount ?? 0,
         count: agg._count,
+        currency: await this.currency(user),
         byCategory: byCategory.map((c) => ({ category: c.category, total: c._sum.amount ?? 0, count: c._count })),
       },
     };

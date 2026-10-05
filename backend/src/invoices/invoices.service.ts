@@ -4,6 +4,8 @@ import { DateTime } from 'luxon';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/current-user.decorator';
 import { allocateInvoiceNumber } from '../common/invoice-number';
+import { computeInvoiceTotals } from '../common/invoice-totals';
+import { money, sum, toNumber } from '../common/money';
 import { paginationMeta } from '../common/pagination';
 import { BASE_CURRENCY, formatMoney } from '../currency/decimals';
 import { PrismaService } from '../prisma/prisma.service';
@@ -33,26 +35,16 @@ export class InvoicesService {
   // Serialization / computation
   // ------------------------------------------------------------------
 
+  /** Delegates to the shared implementation so reports and invoices can never disagree. */
   private computeTotals(booking: Booking, items: InvoiceItem[]): InvoiceTotals {
-    const subtotal =
-      items.length > 0 ? items.reduce((sum, i) => sum + (i.amount || 0), 0) : booking.baseFare ?? booking.amount ?? 0;
-    const discount = booking.discount ?? 0;
-    const taxable = Math.max(0, subtotal - discount);
-    const taxRate = booking.taxRate ?? 0;
-    let taxAmount = 0;
-    if (items.length > 0) {
-      taxAmount = taxRate > 0 ? Math.round(taxable * (taxRate / 100) * 100) / 100 : 0;
-    } else {
-      taxAmount =
-        booking.taxAmount ?? (taxRate > 0 ? Math.round(taxable * (taxRate / 100) * 100) / 100 : 0);
-    }
-    return { subtotal, discount, taxable, taxAmount, total: Math.max(0, taxable + taxAmount) };
+    return computeInvoiceTotals(booking, items);
   }
 
   private serialize(booking: Booking, items: InvoiceItem[]) {
     const totals = this.computeTotals(booking, items);
-    const paidAmount = Math.min(booking.paidAmount ?? 0, totals.total);
-    const due = Math.max(0, totals.total - paidAmount);
+    const currency = booking.currency || BASE_CURRENCY;
+    const paidAmount = money(Math.min(toNumber(booking.paidAmount), totals.total), currency);
+    const due = money(Math.max(0, totals.total - paidAmount), currency);
     const customer = (booking as unknown as { customer?: { id: string; name: string; phone: string; email?: string | null } })
       .customer;
     return {
@@ -131,8 +123,8 @@ export class InvoicesService {
       order?: 'asc' | 'desc';
     },
   ) {
-    const page = Number(query.page) || 1;
-    const limit = Number(query.limit) || 20;
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(1000, Math.max(1, Number(query.limit) || 20));
 
     const where: Record<string, unknown> = {
       businessId: user.businessId,
@@ -181,8 +173,30 @@ export class InvoicesService {
           ? { customer: { name: (query.order || 'asc') as 'asc' } }
           : { invoiceIssuedAt: query.order || 'desc' };
 
-    const [matched, items, total, aggregate] = await Promise.all([
-      this.prisma.booking.findMany({ where, include }),
+    // The stats block used to load every matching booking *with its customer and every invoice
+    // item* just to fold the totals in JavaScript, on every page view. It is now a
+    // column-only scan (6 numbers per row, no relations, no nested arrays), which keeps
+    // computeTotals as the single source of truth without pulling the whole tenant into memory.
+    //
+    // TODO(scaling): at ~50k+ invoices per tenant this is still O(n) per request. The fix is a
+    // denormalised invoiceTotal column kept in sync by syncBookingInvoiceTotals, which would
+    // turn this into a Prisma _sum. That is a schema migration and is deliberately not done here.
+    const totalsScan = await this.prisma.booking.findMany({
+      where,
+      select: {
+        amount: true,
+        baseFare: true,
+        discount: true,
+        taxRate: true,
+        taxAmount: true,
+        paidAmount: true,
+        paymentStatus: true,
+        currency: true,
+        invoiceItems: { select: { amount: true } },
+      },
+    });
+
+    const [items, total, aggregate] = await Promise.all([
       this.prisma.booking.findMany({ where, include, orderBy, skip: (page - 1) * limit, take: limit }),
       this.prisma.booking.count({ where }),
       this.prisma.booking.aggregate({
@@ -194,20 +208,25 @@ export class InvoicesService {
 
     let totalBilled = 0;
     let totalCollected = 0;
-    for (const booking of matched) {
-      const totals = this.computeTotals(booking, booking.invoiceItems as InvoiceItem[]);
-      totalBilled += totals.total;
-      totalCollected += Math.min(booking.paidAmount ?? 0, totals.total);
+    for (const booking of totalsScan) {
+      const currency = booking.currency || BASE_CURRENCY;
+      const totals = this.computeTotals(booking as unknown as Booking, booking.invoiceItems as InvoiceItem[]);
+      totalBilled = money(totalBilled + totals.total, currency);
+      totalCollected = money(
+        totalCollected + money(Math.min(toNumber(booking.paidAmount), totals.total), currency),
+        currency,
+      );
     }
 
     const stats = {
       issued: aggregate._count._all,
-      pending: matched.filter((b) => b.paymentStatus === 'UNPAID').length,
-      partial: matched.filter((b) => b.paymentStatus === 'PARTIAL').length,
-      paid: matched.filter((b) => b.paymentStatus === 'PAID').length,
+      pending: totalsScan.filter((b) => b.paymentStatus === 'UNPAID').length,
+      partial: totalsScan.filter((b) => b.paymentStatus === 'PARTIAL').length,
+      paid: totalsScan.filter((b) => b.paymentStatus === 'PAID').length,
       totalBilled,
       totalCollected,
       outstanding: Math.max(0, totalBilled - totalCollected),
+      currency: totalsScan.find((b) => b.currency)?.currency || 'AED',
     };
 
     return {
@@ -281,7 +300,10 @@ export class InvoicesService {
     const { booking, pdf, pdfInput, totals } = await this.buildPdf(user, id);
     if (!booking.invoiceNumber) return null;
 
-    const itemsTotal = (booking.invoiceItems as InvoiceItem[]).reduce((sum, i) => sum + (i.amount || 0), 0);
+    const itemsTotal = sum(
+      (booking.invoiceItems as InvoiceItem[]).map((i) => toNumber(i.amount)),
+      booking.currency || BASE_CURRENCY,
+    );
 
     const payload: InvoicePayload = {
       booking: { ...(booking as unknown as Record<string, unknown>) },
@@ -293,7 +315,7 @@ export class InvoicesService {
       discount: totals.discount,
       taxAmount: totals.taxAmount,
       total: totals.total,
-      paidAmount: Math.min(booking.paidAmount ?? 0, totals.total),
+      paidAmount: money(Math.min(toNumber(booking.paidAmount), totals.total), booking.currency || BASE_CURRENCY),
       itemsTotal,
       // The date the document is anchored to, matching the one the PDF was rendered
       // with. Storing "now" here instead would make the audit payload disagree with the
@@ -318,8 +340,9 @@ export class InvoicesService {
 
   private async syncBookingInvoiceTotals(user: AuthUser, bookingId: string) {
     const booking = await this.loadInvoice(user, bookingId);
+    const currency = booking.currency || BASE_CURRENCY;
     const totals = this.computeTotals(booking as Booking, booking.invoiceItems as InvoiceItem[]);
-    let paidAmount = Math.min(booking.paidAmount ?? 0, totals.total);
+    let paidAmount = money(Math.min(toNumber(booking.paidAmount), totals.total), currency);
     let paymentStatus: InvoicePaymentStatus = booking.paymentStatus;
 
     if (paidAmount >= totals.total && totals.total > 0) {
@@ -335,6 +358,7 @@ export class InvoicesService {
       where: { id: bookingId },
       data: {
         amount: totals.total,
+        taxAmount: totals.taxAmount,
         paidAmount,
         paymentStatus,
       },
@@ -353,9 +377,10 @@ export class InvoicesService {
 
   async addItem(user: AuthUser, id: string, dto: CreateInvoiceItemDto) {
     const booking = await this.loadInvoice(user, id);
-    const quantity = dto.quantity ?? 1;
-    const unitPrice = dto.unitPrice ?? 0;
-    const amount = dto.amount ?? Math.round(quantity * unitPrice * 100) / 100;
+    const currency = booking.currency || BASE_CURRENCY;
+    const quantity = toNumber(dto.quantity ?? 1);
+    const unitPrice = money(dto.unitPrice ?? 0, currency);
+    const amount = money(dto.amount ?? quantity * unitPrice, currency);
     const sortOrder = dto.sortOrder ?? (booking.invoiceItems.length + 1) * 10;
 
     await this.prisma.invoiceItem.create({
@@ -378,19 +403,22 @@ export class InvoicesService {
   }
 
   async updateItem(user: AuthUser, id: string, itemId: string, dto: UpdateInvoiceItemDto) {
-    const existing = await this.prisma.invoiceItem.findFirst({ where: { id: itemId, bookingId: id } });
+    // Crucial: load invoice first to verify businessId and prevent IDOR
+    const booking = await this.loadInvoice(user, id);
+    const existing = booking.invoiceItems.find((item) => item.id === itemId);
     if (!existing) {
       throw new NotFoundException({ message: 'Invoice item not found', code: 'INVOICE_ITEM_NOT_FOUND' });
     }
+    const currency = booking.currency || BASE_CURRENCY;
 
     const quantity = dto.quantity ?? existing.quantity;
-    const unitPrice = dto.unitPrice ?? existing.unitPrice;
+    const unitPrice = money(dto.unitPrice ?? existing.unitPrice, currency);
     const data: Record<string, unknown> = {};
     if (dto.description !== undefined) data.description = dto.description;
-    if (dto.quantity !== undefined) data.quantity = dto.quantity;
-    if (dto.unitPrice !== undefined) data.unitPrice = dto.unitPrice;
-    if (dto.amount !== undefined) data.amount = dto.amount;
-    else data.amount = Math.round(quantity * unitPrice * 100) / 100;
+    if (dto.quantity !== undefined) data.quantity = toNumber(dto.quantity);
+    if (dto.unitPrice !== undefined) data.unitPrice = unitPrice;
+    if (dto.amount !== undefined) data.amount = money(dto.amount, currency);
+    else data.amount = money(toNumber(quantity) * unitPrice, currency);
     if (dto.sortOrder !== undefined) data.sortOrder = dto.sortOrder;
 
     await this.prisma.invoiceItem.update({ where: { id: itemId }, data });
@@ -404,11 +432,15 @@ export class InvoicesService {
   }
 
   async removeItem(user: AuthUser, id: string, itemId: string) {
-    const existing = await this.prisma.invoiceItem.findFirst({ where: { id: itemId, bookingId: id } });
+    // Crucial: load invoice first to verify businessId and prevent IDOR
+    const booking = await this.loadInvoice(user, id);
+    const existing = booking.invoiceItems.find((item) => item.id === itemId);
     if (!existing) {
       throw new NotFoundException({ message: 'Invoice item not found', code: 'INVOICE_ITEM_NOT_FOUND' });
     }
+
     await this.prisma.invoiceItem.delete({ where: { id: itemId } });
+
     await this.audit.log(user, 'INVOICE_ITEM_REMOVED', 'Booking', id, { itemId });
     return this.syncBookingInvoiceTotals(user, id);
   }
@@ -419,24 +451,62 @@ export class InvoicesService {
 
   async setPayment(user: AuthUser, id: string, dto: SetPaymentDto) {
     const booking = await this.loadInvoice(user, id);
+    const currency = booking.currency || BASE_CURRENCY;
     const totals = this.computeTotals(booking as Booking, booking.invoiceItems as InvoiceItem[]);
 
-    let paidAmount = Math.min(dto.paidAmount ?? booking.paidAmount ?? 0, totals.total);
-    if (dto.status === 'PAID') paidAmount = totals.total;
-    if (dto.status === 'UNPAID') paidAmount = 0;
-    if (dto.status === 'PARTIAL' && (paidAmount <= 0 || paidAmount >= totals.total)) {
-      throw new BadRequestException({
-        message: 'Partial payment must be greater than 0 and less than the invoice total',
-        code: 'PARTIAL_AMOUNT_INVALID',
+    let paidAmount = money(dto.paidAmount !== undefined ? dto.paidAmount : booking.paidAmount, currency);
+    if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+      paidAmount = 0;
+    }
+
+    let status: InvoicePaymentStatus;
+    if (dto.status === 'PAID') {
+      paidAmount = totals.total;
+      status = 'PAID';
+    } else if (dto.status === 'UNPAID') {
+      paidAmount = 0;
+      status = 'UNPAID';
+    } else if (dto.status === 'PARTIAL') {
+      if (paidAmount <= 0 || paidAmount >= totals.total) {
+        throw new BadRequestException({
+          message: 'Partial payment must be greater than 0 and less than the invoice total',
+          code: 'PARTIAL_AMOUNT_INVALID',
+        });
+      }
+      status = 'PARTIAL';
+    } else {
+      if (paidAmount >= totals.total && totals.total > 0) {
+        status = 'PAID';
+        paidAmount = totals.total;
+      } else if (paidAmount > 0) {
+        status = 'PARTIAL';
+      } else {
+        status = 'UNPAID';
+      }
+    }
+
+    paidAmount = money(Math.min(paidAmount, totals.total), currency);
+
+    // Concurrency guard with version check
+    const claimed = await this.prisma.booking.updateMany({
+      where: { id, businessId: user.businessId, version: booking.version },
+      data: {
+        paymentStatus: status,
+        paidAmount,
+        version: { increment: 1 },
+        updatedBy: user.id,
+      },
+    });
+
+    if (claimed.count === 0) {
+      throw new ConflictException({
+        message: 'This invoice was modified by another user. Please reload.',
+        code: 'EDIT_CONFLICT',
       });
     }
 
-    const updated = await this.prisma.booking.update({
+    const updated = await this.prisma.booking.findUniqueOrThrow({
       where: { id },
-      data: {
-        paymentStatus: dto.status as InvoicePaymentStatus,
-        paidAmount,
-      },
       include: {
         customer: { select: { id: true, name: true, phone: true, email: true } },
         invoiceItems: { orderBy: { sortOrder: 'asc' } },
@@ -444,12 +514,10 @@ export class InvoicesService {
     });
 
     await this.audit.log(user, 'INVOICE_PAYMENT_UPDATED', 'Booking', id, {
-      status: dto.status,
+      status,
       paidAmount,
     });
 
-    // Re-capture document snapshot so that downloads and WhatsApp sends reflect the
-    // updated payment status and paid amount.
     if (updated.invoiceNumber) {
       await this.captureInvoiceDocument(user, id);
     }
@@ -474,7 +542,7 @@ export class InvoicesService {
 
     const items = booking.invoiceItems as InvoiceItem[];
     const totals = this.computeTotals(booking as Booking, items);
-    const paidAmount = Math.min(booking.paidAmount ?? 0, totals.total);
+    const paidAmount = money(Math.min(toNumber(booking.paidAmount), totals.total), booking.currency || BASE_CURRENCY);
 
     const pdfInput = {
       booking: booking as Booking,

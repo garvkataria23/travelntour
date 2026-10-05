@@ -7,7 +7,7 @@ export class CreateInvoiceItemDto {
   description: string;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt()
   @Min(1)
   quantity?: number;
 
@@ -32,7 +32,7 @@ export class UpdateInvoiceItemDto {
   description?: string;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt()
   @Min(1)
   quantity?: number;
 

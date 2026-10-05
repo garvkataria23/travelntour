@@ -25,10 +25,12 @@ export class PaginationQuery {
 }
 
 export function paginationMeta(total: number, page: number, limit: number) {
+  const totalPages = Math.max(1, Math.ceil(total / limit));
   return {
     total,
     page,
     limit,
-    totalPages: Math.max(1, Math.ceil(total / limit)),
+    totalPages,
+    pages: totalPages,
   };
 }

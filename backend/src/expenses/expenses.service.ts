@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { ExpenseCategory, Prisma } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { AuthUser } from '../common/current-user.decorator';
@@ -55,10 +55,12 @@ export class ExpensesService {
     ]);
     const agg = await this.prisma.expense.aggregate({ where, _sum: { amount: true }, _count: true });
 
+    const userCurrency = await this.currency(user);
+
     return {
       items,
       meta: { page, limit, total, pages: Math.ceil(total / limit) },
-      summary: { total: agg._sum.amount ?? 0, count: agg._count },
+      summary: { total: agg._sum.amount ?? 0, count: agg._count, currency: userCurrency },
     };
   }
 
@@ -108,6 +110,7 @@ export class ExpensesService {
 
     return {
       month: month ?? 'current-month',
+      currency: await this.currency(user),
       direct: byCategory.find((r) => r.category === 'DIRECT')?.total ?? 0,
       operating: byCategory.find((r) => r.category === 'OPERATING')?.total ?? 0,
       total: agg._sum.amount ?? 0,

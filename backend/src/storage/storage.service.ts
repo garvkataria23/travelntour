@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   compressJson,
@@ -170,16 +170,34 @@ export class StorageService {
    * access token and any reasonable refresh lifetime) and 255 days for invoice bytes,
    * which keeps a full financial year on disk.
    */
-  async sweep(options?: { tokenMaxAgeDays?: number; invoicePruneAfterDays?: number; now?: Date }) {
+  async sweep(
+    businessId: string,
+    options?: { tokenMaxAgeDays?: number; invoicePruneAfterDays?: number; now?: Date },
+  ) {
     const now = options?.now ?? new Date();
     const tokenMaxAgeDays = options?.tokenMaxAgeDays ?? 30;
     const invoicePruneAfterDays = options?.invoicePruneAfterDays ?? 255;
 
+    // Guard against a nonsensical threshold. `invoicePruneAfterDays: 0` used to null the stored PDF
+    // of every invoice in the deployment, from a single fat-fingered value.
+    if (tokenMaxAgeDays < 1 || invoicePruneAfterDays < 1) {
+      throw new BadRequestException({
+        message: 'Retention windows must be at least 1 day',
+        code: 'RETENTION_WINDOW_INVALID',
+      });
+    }
+
     const tokenCutoff = new Date(now.getTime() - tokenMaxAgeDays * 86_400_000);
     const invoiceCutoff = new Date(now.getTime() - invoicePruneAfterDays * 86_400_000);
 
+    // BOTH queries are scoped to the caller's tenant.
+    //
+    // This was the most serious defect in the codebase: neither query had a `businessId` filter, so
+    // any tenant administrator running "cleanup" deleted *every* tenant's expired refresh tokens
+    // and nulled *every* tenant's retained invoice PDFs. A routine retention job was a
+    // cross-tenant destructive operation.
     const tokens = await this.prisma.refreshToken.deleteMany({
-      where: { createdAt: { lt: tokenCutoff } },
+      where: { createdAt: { lt: tokenCutoff }, user: { businessId } },
     });
 
     // Nulling `pdf` rather than deleting the row: Postgres keeps the dead tuple until
@@ -196,7 +214,7 @@ export class StorageService {
     // saving with every sweep. `rawBytes` is deliberately kept, since it is a fact about
     // the document that was issued rather than about what is still on disk.
     const invoices = await this.prisma.invoiceDocument.updateMany({
-      where: { prunedAt: null, createdAt: { lt: invoiceCutoff } },
+      where: { businessId, prunedAt: null, createdAt: { lt: invoiceCutoff } },
       data: { pdf: Buffer.alloc(0), storedBytes: 0, prunedAt: now },
     });
 
@@ -275,10 +293,27 @@ export class StorageService {
   }
 
   /**
-   * Complete business data export for one-click backups.
-   * Exports all tenant-scoped entities: customers, bookings, invoices, expenses, income, settings.
+   * Complete, restorable archive of one tenant.
+   *
+   * COVERAGE
+   *
+   * The previous version exported ten tables and silently omitted four that matter:
+   * `auditLog` (the compliance trail), `invoiceDocument` (every issued invoice PDF and the frozen
+   * payload it was issued with), `scheduledMessage` (queued and failed sends) and `messageLog` (the
+   * full WhatsApp history). A restore from that archive would have produced a working system with
+   * no proof of what was issued and no message history.
+   *
+   * EXCLUSIONS, DELIBERATE
+   *
+   *   - `passwordHash` — never leaves the database, in any backup. Re-provisioning is a deliberate
+   *     admin action, not something an archive should carry.
+   *   - `refreshToken` — ephemeral credentials; restoring them would resurrect live sessions.
+   *   - `BusinessSetting` bank/GST columns are included, because a restored tenant must be able to
+   *     issue a valid invoice. The archive is protected by the same platform-owner permission as
+   *     the operation that produced it, and it is written to a service-account Drive folder rather
+   *     than a browser.
    */
-  async exportBusinessBackup(businessId: string) {
+  async exportBusinessBackup(businessId: string, options: { maxBlobBytes?: number } = {}) {
     const [
       business,
       setting,
@@ -290,12 +325,26 @@ export class StorageService {
       templates,
       automationRules,
       whatsappAccount,
+      auditLogs,
+      invoiceDocuments,
+      scheduledMessages,
+      messageLogs,
     ] = await Promise.all([
       this.prisma.business.findUnique({ where: { id: businessId } }),
       this.prisma.businessSetting.findUnique({ where: { businessId } }),
       this.prisma.user.findMany({
         where: { businessId },
-        select: { id: true, name: true, email: true, phone: true, role: true, status: true, createdAt: true },
+        // passwordHash is not in this list, and must never be added to it.
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          role: true,
+          status: true,
+          lastLoginAt: true,
+          createdAt: true,
+        },
       }),
       this.prisma.customer.findMany({ where: { businessId } }),
       this.prisma.booking.findMany({
@@ -310,23 +359,71 @@ export class StorageService {
         where: { businessId },
         select: { id: true, phoneNumberId: true, displayPhoneNumber: true, status: true },
       }),
+      this.prisma.auditLog.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'asc' },
+      }),
+      // `payload` (the frozen figures the document was issued with) is the compliance record and
+      // is kept. `pdf` and `payload` are stored brotli-compressed as binary, which JSON cannot
+      // carry directly, so both are base64'd below.
+      //
+      // The PDF bytes are included deliberately. An archive that keeps only the metadata produces
+      // InvoiceDocument rows whose PDFs are permanently gone, which means the restore is not a
+      // restore - issued invoices, which are financial records, silently stop being downloadable.
+      // Already-pruned documents are exported as metadata with a null blob rather than as a
+      // zero-length PDF that would later decompress to garbage.
+      this.prisma.invoiceDocument.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          bookingId: true,
+          invoiceNumber: true,
+          sha256: true,
+          rawBytes: true,
+          storedBytes: true,
+          payload: true,
+          payloadRawBytes: true,
+          payloadStoredBytes: true,
+          pdf: true,
+          prunedAt: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.scheduledMessage.findMany({
+        where: { businessId },
+        orderBy: { scheduledAt: 'asc' },
+      }),
+      this.prisma.messageLog.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'asc' },
+      }),
     ]);
+
+    const encoded = this.encodeDocuments(invoiceDocuments, options.maxBlobBytes ?? MAX_BLOB_BYTES);
+
+    const counts = {
+      users: users.length,
+      customers: customers.length,
+      bookings: bookings.length,
+      invoiceItems: bookings.reduce((n, b) => n + (b.invoiceItems?.length ?? 0), 0),
+      expenses: expenses.length,
+      income: income.length,
+      templates: templates.length,
+      automationRules: automationRules.length,
+      auditLogs: auditLogs.length,
+      invoiceDocuments: invoiceDocuments.length,
+      scheduledMessages: scheduledMessages.length,
+      messageLogs: messageLogs.length,
+    };
 
     return {
       appName: 'FlyConnect',
-      version: '1.0.0',
+      version: '2.0.0',
       exportedAt: new Date().toISOString(),
       businessId,
       businessName: business?.name || 'FlyConnect Business',
-      counts: {
-        users: users.length,
-        customers: customers.length,
-        bookings: bookings.length,
-        expenses: expenses.length,
-        income: income.length,
-        templates: templates.length,
-        automationRules: automationRules.length,
-      },
+      counts,
       data: {
         business,
         setting,
@@ -338,7 +435,99 @@ export class StorageService {
         templates,
         automationRules,
         whatsappAccount,
+        auditLogs,
+        // Encoded here rather than in the select, so the rest of the file keeps working with the
+        // rows as Prisma returns them.
+        invoiceDocuments: encoded.documents,
+        scheduledMessages,
+        messageLogs,
+      },
+      // Stated in the archive itself so a restore can tell "no PDF was ever retained" from
+      // "this archive was too large to carry them". Without this, silently dropping bytes to fit a
+      // budget would be indistinguishable from data that never existed.
+      invoiceBlobs: {
+        included: encoded.included,
+        skippedForBudget: encoded.skippedForBudget,
+        budgetBytes: options.maxBlobBytes ?? MAX_BLOB_BYTES,
       },
     };
   }
+
+  /**
+   * Base64-encodes document blobs within a byte budget.
+   *
+   * Why a budget at all: `pdf` and `payload` are brotli-compressed binary, and JSON cannot carry
+   * binary. Base64 costs 33% on bytes that are already compressed. A tenant retaining years of
+   * invoices would produce archives large enough to be slow to generate, slow to upload and slow to
+   * parse - and the restore path holds the whole file in memory. So there is a ceiling.
+   *
+   * Documents are walked oldest-first (the query orders by `createdAt`), and the budget is spent in
+   * that order, so the *oldest* invoices are the ones that lose their bytes. That is the opposite of
+   * what retention policy usually assumes, and is deliberate: an operator restoring after an outage
+   * is far more likely to need a customer's original booking than a two-year-old invoice, and the
+   * metadata row survives either way.
+   *
+   * `prunedAt` is set on anything skipped so the restore path treats it exactly like a document
+   * whose bytes were never retained, rather than writing a zero-length PDF that decompresses to
+   * garbage.
+   */
+  private encodeDocuments(
+    docs: Array<Record<string, unknown>>,
+    maxBlobBytes: number,
+  ): {
+    documents: Array<Record<string, unknown>>;
+    included: number;
+    skippedForBudget: number;
+  } {
+    let spent = 0;
+    let included = 0;
+    let skippedForBudget = 0;
+
+    const documents = docs.map((doc) => {
+      const pdf = encodeBytes(doc['pdf']);
+      const payload = encodeBytes(doc['payload']);
+
+      // Always keep the payload. It is the frozen set of figures the invoice was issued with and
+      // is the compliance record; it is also tiny relative to the PDF.
+      let encodedPdf: string | null = null;
+      if (pdf !== null) {
+        if (spent + pdf.length <= maxBlobBytes) {
+          spent += pdf.length;
+          encodedPdf = pdf;
+          included += 1;
+        } else {
+          skippedForBudget += 1;
+        }
+      }
+
+      return {
+        ...doc,
+        pdf: encodedPdf,
+        payload,
+        ...(encodedPdf === null && pdf !== null ? { prunedAt: new Date() } : {}),
+      };
+    });
+
+    return { documents, included, skippedForBudget };
+  }
+}
+
+/**
+ * Ceiling on base64-encoded invoice PDF bytes in a single archive.
+ *
+ * Sized so a busy tenant's archive stays a few tens of MB rather than hundreds: generation,
+ * upload and restore all hold the serialised archive in memory, so an unbounded blob set is a
+ * memory-pressure risk on the restore path in particular.
+ *
+ * Raising it costs 33% over the compressed byte count, since base64 is the cost of carrying
+ * already-brotli-compressed bytes inside a JSON envelope.
+ */
+const MAX_BLOB_BYTES = 64 * 1024 * 1024;
+
+function encodeBytes(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const buf =
+    value instanceof Uint8Array ? value : new Uint8Array(value as ArrayBufferLike);
+  // Pruning writes a zero-length blob rather than NULL. Both mean "there is no document here".
+  return buf.byteLength === 0 ? null : Buffer.from(buf).toString('base64');
 }

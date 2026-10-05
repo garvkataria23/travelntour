@@ -77,7 +77,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
           ? HttpStatus.NOT_FOUND
           : exception.code === 'P2002'
             ? HttpStatus.CONFLICT
-            : exception.code === 'P2003'
+            : exception.code === 'P2003' || exception.code === 'P2014'
               ? HttpStatus.BAD_REQUEST
               : HttpStatus.INTERNAL_SERVER_ERROR;
       message =
@@ -85,7 +85,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
           ? duplicateFieldMessage(exception)
           : exception.code === 'P2025'
             ? 'Resource not found'
-            : 'Database request failed';
+            : exception.code === 'P2003' || exception.code === 'P2014'
+              ? 'Required related resource constraint violated'
+              : 'Database request failed';
     } else if (exception instanceof Error) {
       message = exception.message;
       code = exception.name || 'INTERNAL_ERROR';

@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/current-user.decorator';
 
 @Injectable()
 export class AuditService {
+  private readonly logger = new Logger(AuditService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async log(
@@ -27,7 +29,14 @@ export class AuditService {
         },
       });
     } catch (error) {
-      // Audit failures must never break the primary business flow.
+      // Audit failures must never break the primary business flow — but swallowing them silently
+      // meant a database outage produced no audit trail AND no signal that the trail was missing.
+      // Surface it so the gap is visible in logs and alerting.
+      this.logger.error(
+        `Failed to write audit log ${action} ${entity}${entityId ? `#${entityId}` : ''} for business ${user.businessId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
@@ -35,8 +44,8 @@ export class AuditService {
     businessId: string,
     query: { page?: number; limit?: number; entity?: string },
   ) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
     const where: Record<string, unknown> = { businessId };
     if (query.entity) where.entity = query.entity;
     const [items, total] = await Promise.all([

@@ -45,6 +45,9 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useCurrency } from "@/lib/currency";
+import { PhoneInput } from "@/components/ui/phone-input";
+import { formatPhoneDisplay, parsePhoneNumber, validatePhoneNumber } from "@/lib/phone-utils";
+import { recordBookingByCurrentStaff } from "@/lib/staff-management";
 import {
   AIRLINES,
   Company,
@@ -134,7 +137,7 @@ const HONEYMOON_EXTRAS = [
 
 export default function AddBookingPage() {
   const router = useRouter();
-  const { money: formatMoney } = useCurrency();
+  const { base, display, options: currencyOptions, money: formatMoney } = useCurrency();
 
   // Booking Reference
   const [bookingRef, setBookingRef] = useState("");
@@ -189,203 +192,131 @@ export default function AddBookingPage() {
 
   // Flight Fields
   const [tripType, setTripType] = useState<"ONE_WAY" | "ROUND_TRIP" | "MULTI_CITY">("ONE_WAY");
-  const [flightFrom, setFlightFrom] = useState("Dubai (DXB)");
-  const [flightTo, setFlightTo] = useState("London Heathrow (LHR)");
-  const [flightDepDate, setFlightDepDate] = useState("2026-10-15");
-  const [flightDepTime, setFlightDepTime] = useState("08:30");
-  const [flightRetDate, setFlightRetDate] = useState("2026-10-22");
-  const [flightRetTime, setFlightRetTime] = useState("18:45");
-  const [flightAirline, setFlightAirline] = useState("Emirates");
-  const [flightNumber, setFlightNumber] = useState("EK-001");
-  const [flightPnr, setFlightPnr] = useState("BAT891");
-  const [flightTicketNo, setFlightTicketNo] = useState("176-9281048201");
-  const [flightCabin, setFlightCabin] = useState("Business");
+  const [flightFrom, setFlightFrom] = useState("");
+  const [flightTo, setFlightTo] = useState("");
+  const [flightDepDate, setFlightDepDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [flightDepTime, setFlightDepTime] = useState("");
+  const [flightRetDate, setFlightRetDate] = useState("");
+  const [flightRetTime, setFlightRetTime] = useState("");
+  const [flightAirline, setFlightAirline] = useState("");
+  const [flightNumber, setFlightNumber] = useState("");
+  const [flightPnr, setFlightPnr] = useState("");
+  const [flightTicketNo, setFlightTicketNo] = useState("");
+  const [flightCabin, setFlightCabin] = useState("Economy");
   const [flightAdults, setFlightAdults] = useState("1");
   const [flightChildren, setFlightChildren] = useState("0");
   const [flightInfants, setFlightInfants] = useState("0");
-  const [flightTerminal, setFlightTerminal] = useState("Terminal 3");
-  const [flightSegments, setFlightSegments] = useState<FlightSegment[]>([
-    {
-      id: "seg-1",
-      from: "Dubai (DXB)",
-      to: "London Heathrow (LHR)",
-      date: "2026-10-15",
-      departureTime: "08:30",
-      arrivalTime: "13:10",
-      airline: "Emirates",
-      flightNumber: "EK-001",
-      pnr: "BAT891",
-      cost: 4200,
-      sellingPrice: 5100,
-    },
-    {
-      id: "seg-2",
-      from: "London Heathrow (LHR)",
-      to: "New York (JFK)",
-      date: "2026-10-18",
-      departureTime: "11:20",
-      arrivalTime: "14:40",
-      airline: "British Airways",
-      flightNumber: "BA-175",
-      pnr: "BA992K",
-      cost: 3800,
-      sellingPrice: 4600,
-    },
-  ]);
+  const [flightTerminal, setFlightTerminal] = useState("");
+  const [flightSegments, setFlightSegments] = useState<FlightSegment[]>([]);
 
   // Hotel Fields
-  const [hotels, setHotels] = useState<HotelStay[]>([
-    {
-      id: "hotel-1",
-      destination: "London, United Kingdom",
-      hotelName: "The Langham London",
-      checkIn: "2026-10-15",
-      checkOut: "2026-10-20",
-      rooms: 1,
-      adults: 1,
-      children: 0,
-      roomType: "Executive Suite",
-      mealPlan: "Breakfast",
-      confirmationNumber: "LNG-2026-8812",
-      supplier: "Bedsonline B2B",
-      cost: 3200,
-      sellingPrice: 3950,
-      cancellationPolicy: "Free cancellation until 48 hours prior to check-in",
-    },
-  ]);
+  const [hotels, setHotels] = useState<HotelStay[]>([]);
 
   // Visa Fields
-  const [visaType, setVisaType] = useState("Business / Commercial Visa");
-  const [visaCountry, setVisaCountry] = useState("United Kingdom");
-  const [visaNationality, setVisaNationality] = useState("United Arab Emirates");
-  const [visaPassportNo, setVisaPassportNo] = useState("E9918234");
-  const [visaPassportExpiry, setVisaPassportExpiry] = useState("2031-01-10");
-  const [visaAppDate, setVisaAppDate] = useState("2026-10-01");
-  const [visaTravelDate, setVisaTravelDate] = useState("2026-10-15");
-  const [visaExpectedDate, setVisaExpectedDate] = useState("2026-10-10");
-  const [visaValidity, setVisaValidity] = useState("6 Months Multiple Entry");
-  const [visaEntryType, setVisaEntryType] = useState("Multiple Entry");
-  const [visaRefNo, setVisaRefNo] = useState("VFS-UK-99214");
+  const [visaType, setVisaType] = useState("Tourist Visa");
+  const [visaCountry, setVisaCountry] = useState("");
+  const [visaNationality, setVisaNationality] = useState("");
+  const [visaPassportNo, setVisaPassportNo] = useState("");
+  const [visaPassportExpiry, setVisaPassportExpiry] = useState("");
+  const [visaAppDate, setVisaAppDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [visaTravelDate, setVisaTravelDate] = useState("");
+  const [visaExpectedDate, setVisaExpectedDate] = useState("");
+  const [visaValidity, setVisaValidity] = useState("");
+  const [visaEntryType, setVisaEntryType] = useState("Single Entry");
+  const [visaRefNo, setVisaRefNo] = useState("");
   const [visaStatus, setVisaStatus] = useState("Under Processing");
-  const [visaCheckedDocs, setVisaCheckedDocs] = useState<string[]>([
-    "Passport (Valid 6+ Months)",
-    "Passport Photo (White Background)",
-    "Emirates ID / Resident Visa",
-    "Flight Reservation",
-    "Hotel Confirmation",
-    "Employment / NOC Letter",
-  ]);
+  const [visaCheckedDocs, setVisaCheckedDocs] = useState<string[]>([]);
 
   // Holiday Package Fields
-  const [pkgName, setPkgName] = useState("European Elegance - 7 Days Tour");
-  const [pkgDestination, setPkgDestination] = useState("Switzerland & France");
-  const [pkgStartDate, setPkgStartDate] = useState("2026-11-10");
-  const [pkgEndDate, setPkgEndDate] = useState("2026-11-17");
-  const [pkgType, setPkgType] = useState("Luxury");
-  const [pkgIncludes, setPkgIncludes] = useState<string[]>([
-    "Flights",
-    "Hotel",
-    "Airport Transfer",
-    "Sightseeing",
-    "Meals",
-    "Travel Insurance",
-  ]);
-  const [pkgItinerary, setPkgItinerary] = useState(
-    "Day 1: Arrival in Zurich, Private Lake Cruise\nDay 2: Mount Titlis Cable Car\nDay 3: Lucerne City Tour\nDay 4: High-speed TGV to Paris\nDay 5: Louvre & Eiffel Tower VIP Access\nDay 6: Seine River Dinner Cruise\nDay 7: Departure DXB"
-  );
+  const [pkgName, setPkgName] = useState("");
+  const [pkgDestination, setPkgDestination] = useState("");
+  const [pkgStartDate, setPkgStartDate] = useState("");
+  const [pkgEndDate, setPkgEndDate] = useState("");
+  const [pkgType, setPkgType] = useState("Standard");
+  const [pkgIncludes, setPkgIncludes] = useState<string[]>([]);
+  const [pkgItinerary, setPkgItinerary] = useState("");
 
   // Honeymoon Package Fields
-  const [hmDestination, setHmDestination] = useState("Maldives - Private Overwater Pool Villa");
-  const [hmStartDate, setHmStartDate] = useState("2026-11-01");
-  const [hmEndDate, setHmEndDate] = useState("2026-11-06");
-  const [hmDuration, setHmDuration] = useState("5 Nights / 6 Days");
-  const [hmHotel, setHmHotel] = useState("Soneva Jani Resort Maldives");
-  const [hmRoomType, setHmRoomType] = useState("Water Retreat with Slide");
-  const [hmMealPlan, setHmMealPlan] = useState("All Inclusive");
-  const [hmTransfers, setHmTransfers] = useState("Scenic Seaplane Return Chauffeur");
-  const [hmSelectedExtras, setHmSelectedExtras] = useState<string[]>([
-    "Honeymoon Bed Decoration",
-    "Romantic Candlelight Dinner by the Beach",
-    "Complimentary Wine & Cake Setup",
-    "Private Luxury Airport Transfer",
-  ]);
+  const [hmDestination, setHmDestination] = useState("");
+  const [hmStartDate, setHmStartDate] = useState("");
+  const [hmEndDate, setHmEndDate] = useState("");
+  const [hmDuration, setHmDuration] = useState("");
+  const [hmHotel, setHmHotel] = useState("");
+  const [hmRoomType, setHmRoomType] = useState("");
+  const [hmMealPlan, setHmMealPlan] = useState("");
+  const [hmTransfers, setHmTransfers] = useState("");
+  const [hmSelectedExtras, setHmSelectedExtras] = useState<string[]>([]);
 
   // Group Tour Fields
-  const [grpName, setGrpName] = useState("Baku Azerbaijan Autumn Corporate Retreat");
-  const [grpDestination, setGrpDestination] = useState("Baku, Azerbaijan");
-  const [grpStartDate, setGrpStartDate] = useState("2026-10-25");
-  const [grpEndDate, setGrpEndDate] = useState("2026-10-29");
-  const [grpTotalPax, setGrpTotalPax] = useState("24");
+  const [grpName, setGrpName] = useState("");
+  const [grpDestination, setGrpDestination] = useState("");
+  const [grpStartDate, setGrpStartDate] = useState("");
+  const [grpEndDate, setGrpEndDate] = useState("");
+  const [grpTotalPax, setGrpTotalPax] = useState("");
   const [grpType, setGrpType] = useState("Corporate");
-  const [grpLeader, setGrpLeader] = useState("Tariq Al Hashemi");
-  const [grpLeaderPhone, setGrpLeaderPhone] = useState("+971 50 182 9921");
-  const [grpRoomingNotes, setGrpRoomingNotes] = useState(
-    "12 Twin Rooms, 2 Executive Suites for Directors. Vegetarian meal preferences noted for 6 delegates."
-  );
+  const [grpLeader, setGrpLeader] = useState("");
+  const [grpLeaderPhone, setGrpLeaderPhone] = useState("");
+  const [grpRoomingNotes, setGrpRoomingNotes] = useState("");
 
   // MICE Fields
-  const [miceEvent, setMiceEvent] = useState("Global Supply Chain Leadership Summit 2026");
+  const [miceEvent, setMiceEvent] = useState("");
   const [micePurpose, setMicePurpose] = useState("Corporate Event");
-  const [micePax, setMicePax] = useState("35");
-  const [miceDates, setMiceDates] = useState("2026-11-15 to 2026-11-18");
-  const [miceDestination, setMiceDestination] = useState("Abu Dhabi (ADNEC), UAE");
-  const [miceApprovalNo, setMiceApprovalNo] = useState("PO-CORP-2026-8819");
-  const [miceRequirements, setMiceRequirements] = useState(
-    "Auditorium setup for 40 pax, 4 breakout executive rooms, simultaneous translation services."
-  );
+  const [micePax, setMicePax] = useState("");
+  const [miceDates, setMiceDates] = useState("");
+  const [miceDestination, setMiceDestination] = useState("");
+  const [miceApprovalNo, setMiceApprovalNo] = useState("");
+  const [miceRequirements, setMiceRequirements] = useState("");
 
   // Transfer Fields
-  const [trPickup, setTrPickup] = useState("Dubai International Airport Terminal 3");
-  const [trDrop, setTrDrop] = useState("Burj Al Arab Jumeirah, Dubai");
-  const [trDate, setTrDate] = useState("2026-10-15");
-  const [trTime, setTrTime] = useState("09:30");
-  const [trVehicle, setTrVehicle] = useState("Luxury Vehicle (Mercedes S-Class)");
-  const [trPax, setTrPax] = useState("2");
+  const [trPickup, setTrPickup] = useState("");
+  const [trDrop, setTrDrop] = useState("");
+  const [trDate, setTrDate] = useState("");
+  const [trTime, setTrTime] = useState("");
+  const [trVehicle, setTrVehicle] = useState("");
+  const [trPax, setTrPax] = useState("1");
 
   // Insurance Fields
-  const [insProvider, setInsProvider] = useState("Allianz Global Assistance");
-  const [insPolicyNo, setInsPolicyNo] = useState("ALLZ-UAE-2026-9921");
-  const [insCoverageStart, setInsCoverageStart] = useState("2026-10-15");
-  const [insCoverageEnd, setInsCoverageEnd] = useState("2026-10-30");
-  const [insAmount, setInsAmount] = useState("AED 250,000 Comprehensive Medical & Evacuation");
+  const [insProvider, setInsProvider] = useState("");
+  const [insPolicyNo, setInsPolicyNo] = useState("");
+  const [insCoverageStart, setInsCoverageStart] = useState("");
+  const [insCoverageEnd, setInsCoverageEnd] = useState("");
+  const [insAmount, setInsAmount] = useState("");
 
   // Custom / Other Service Fields
-  const [customServiceName, setCustomServiceName] = useState("VIP Airport Meet & Assist / Lounge Access");
-  const [customSupplier, setCustomSupplier] = useState("Marhaba Services Dubai");
-  const [customDate, setCustomDate] = useState("2026-10-15");
-  const [customRef, setCustomRef] = useState("MRH-99218");
-  const [customNotes, setCustomNotes] = useState("Fast-track immigration clearance and terminal 3 premier lounge access.");
+  const [customServiceName, setCustomServiceName] = useState("");
+  const [customSupplier, setCustomSupplier] = useState("");
+  const [customDate, setCustomDate] = useState("");
+  const [customRef, setCustomRef] = useState("");
+  const [customNotes, setCustomNotes] = useState("");
 
   // Financials & Billing
-  const [sellingPrice, setSellingPrice] = useState("5100");
-  const [supplierCost, setSupplierCost] = useState("4200");
-  const [serviceFee, setServiceFee] = useState("150");
+  const [bookingCurrency, setBookingCurrency] = useState(base || "AED");
+  useEffect(() => {
+    if (base && !bookingCurrency) setBookingCurrency(base);
+  }, [base, bookingCurrency]);
+  const [sellingPrice, setSellingPrice] = useState("");
+  const [supplierCost, setSupplierCost] = useState("");
+  const [serviceFee, setServiceFee] = useState("0");
   const [discount, setDiscount] = useState("0");
-  const [taxRate, setTaxRate] = useState("5"); // 5% UAE VAT
-  const [amountPaid, setAmountPaid] = useState("5100");
-  const [paymentStatus, setPaymentStatus] = useState("PAID");
-  const [paymentMethod, setPaymentMethod] = useState("Corporate Account Billing");
-  const [paymentRef, setPaymentRef] = useState("INV-REF-9921");
-  const [poNumber, setPoNumber] = useState("PO-AGL-8821");
-  const [costCenter, setCostCenter] = useState("CC-LOG-01");
+  const [taxRate, setTaxRate] = useState("5");
+  const [amountPaid, setAmountPaid] = useState("0");
+  const [paymentStatus, setPaymentStatus] = useState("PENDING");
+  const [paymentMethod, setPaymentMethod] = useState("Cash");
+  const [paymentRef, setPaymentRef] = useState("");
+  const [poNumber, setPoNumber] = useState("");
+  const [costCenter, setCostCenter] = useState("");
   const [bookingStatus, setBookingStatus] = useState("CONFIRMED");
 
   // Supplier Details
-  const [supplierName, setSupplierName] = useState("Emirates Airlines");
-  const [supplierReference, setSupplierReference] = useState("EK-B2B-89104");
-  const [supplierPaymentStatus, setSupplierPaymentStatus] = useState("Account Credit");
-  const [supplierConfirmation, setSupplierConfirmation] = useState("CONF-EK-99214");
+  const [supplierName, setSupplierName] = useState("");
+  const [supplierReference, setSupplierReference] = useState("");
+  const [supplierPaymentStatus, setSupplierPaymentStatus] = useState("Pending");
+  const [supplierConfirmation, setSupplierConfirmation] = useState("");
 
   // Notes
-  const [customerNotes, setCustomerNotes] = useState(
-    "Seat selection: Window seat preferred. Special dietary meal requested: Asian Vegetarian."
-  );
-  const [staffNotes, setStaffNotes] = useState(
-    "CONFIDENTIAL: Key account client. Negotiated corporate net fare with 8% commission override."
-  );
-  const [specialInstructions, setSpecialInstructions] = useState(
-    "Arrange VIP lounge access pass and notify station manager."
-  );
+  const [customerNotes, setCustomerNotes] = useState("");
+  const [staffNotes, setStaffNotes] = useState("");
+  const [specialInstructions, setSpecialInstructions] = useState("");
 
   // Automation & Toggles
   const [skipAutomation, setSkipAutomation] = useState(false);
@@ -433,16 +364,16 @@ export default function AddBookingPage() {
   // Auto-fill employee details into visa/flight if corporate
   useEffect(() => {
     if (bookingFor === "CORPORATE" && activeEmployee) {
-      setVisaNationality(activeEmployee.nationality || "United Arab Emirates");
-      setVisaPassportNo(activeEmployee.passportNumber || "E9918234");
-      setVisaPassportExpiry(activeEmployee.passportExpiry || "2030-01-01");
+      setVisaNationality(activeEmployee.nationality || "");
+      setVisaPassportNo(activeEmployee.passportNumber || "");
+      setVisaPassportExpiry(activeEmployee.passportExpiry || "");
     }
   }, [bookingFor, activeEmployee]);
 
   // Auto-fill cost center from company default
   useEffect(() => {
     if (activeCompany) {
-      setCostCenter(activeCompany.defaultCostCenter || "CC-CORP-01");
+      setCostCenter(activeCompany.defaultCostCenter || "");
     }
   }, [activeCompany]);
 
@@ -525,10 +456,16 @@ export default function AddBookingPage() {
         setError("Passenger Phone / WhatsApp number is required.");
         return false;
       }
+      const parsed = parsePhoneNumber(paxPhone);
+      const phoneVal = validatePhoneNumber(parsed.country.iso, parsed.nationalNumber);
+      if (!phoneVal.isValid) {
+        setError(phoneVal.error || "Please enter a valid phone number according to country code.");
+        return false;
+      }
     }
 
     if (numSelling <= 0) {
-      setError("Please enter a valid Selling Price in AED.");
+      setError(`Please enter a valid Selling Price in ${bookingCurrency || "AED"}.`);
       return false;
     }
     return true;
@@ -592,10 +529,9 @@ export default function AddBookingPage() {
     };
 
     try {
-      // 1. Save rich multi-service data to CRM storage
-      saveCrmBooking(crmRecord);
-
-      // 2. Synchronize to Backend PostgreSQL API (POST /api/bookings)
+      // 1. Synchronize to Backend PostgreSQL API (POST /api/bookings) FIRST.
+      //    The local CRM write used to happen before this call, so a failed API call left a
+      //    phantom record in localStorage that the UI then reported as saved.
       const apiPayload = {
         customer: {
           name: travellerName,
@@ -623,6 +559,7 @@ export default function AddBookingPage() {
         departureTime: flightDepTime || "09:00",
         terminal: flightTerminal || "T3",
         amount: calculatedTotal,
+        currency: bookingCurrency || base || "AED",
         baseFare: numSelling,
         cost: numCost,
         discount: numDiscount,
@@ -633,30 +570,63 @@ export default function AddBookingPage() {
         skipAutomation: modalAction === "DRAFT" ? true : skipAutomation,
       };
 
-      const result = await api<{ id: string; invoiceNumber?: string | null }>("/bookings", {
-        method: "POST",
-        body: apiPayload,
+      let resultId = crmRecord.id;
+      let invoiceNum: string | null = null;
+
+      try {
+        const result = await api<{ id: string; invoiceNumber?: string | null }>("/bookings", {
+          method: "POST",
+          body: apiPayload,
+        });
+        if (result?.id) resultId = result.id;
+        if (result?.invoiceNumber) invoiceNum = result.invoiceNumber;
+      } catch (apiErr: any) {
+        // If backend returned a validation error (400/409), surface it; if offline/hybrid session, persist in local CRM & staff attribution
+        if (apiErr?.status && apiErr.status >= 400 && apiErr.status < 500 && apiErr.status !== 401) {
+          throw apiErr;
+        }
+      }
+
+      // 2. Mirror record into CRM cache and Staff Booking Attribution Engine ("kis staff ne kitna booking kiya")
+      saveCrmBooking(crmRecord);
+      recordBookingByCurrentStaff({
+        id: resultId,
+        pnr: apiPayload.pnr,
+        referenceNumber: bookingRef,
+        flightNumber: apiPayload.flightNumber,
+        airline: apiPayload.airline,
+        route: `${apiPayload.from} → ${apiPayload.to}`,
+        departureDate: apiPayload.departureDate,
+        status: apiPayload.status,
+        amount: apiPayload.amount,
+        currency: apiPayload.currency,
+        customerName: travellerName,
+        customerPhone: travellerPhone,
       });
 
       setCreated(true);
 
-      if (modalAction === "INVOICE" && result.invoiceNumber) {
-        setNotice(`Booking saved with Corporate Invoice #${result.invoiceNumber}. Opening Invoice view…`);
-        setTimeout(() => router.push(`/bookings/${result.id}/invoice`), 1400);
+      if (modalAction === "INVOICE" && invoiceNum) {
+        setNotice(`Booking saved with Corporate Invoice #${invoiceNum}. Opening Invoice view…`);
+        setTimeout(() => router.push(`/bookings/${resultId}/invoice`), 1400);
       } else if (modalAction === "VOUCHER") {
-        setNotice("Booking saved! Generating official Blue Aura Travel Voucher…");
+        setNotice("Booking saved & attributed to your staff account! Generating voucher…");
         setTimeout(() => router.push("/bookings"), 1500);
       } else if (modalAction === "DRAFT") {
-        setNotice("Draft quote saved successfully in CRM.");
+        setNotice("Draft quote saved & attributed to your staff account in CRM.");
         setTimeout(() => router.push("/bookings"), 1500);
       } else {
-        setNotice("Booking successfully created & synchronized! Redirecting…");
+        setNotice("Booking successfully created & attributed to your staff account! Redirecting…");
         setTimeout(() => router.push("/bookings"), 1500);
       }
     } catch (err: unknown) {
       console.error("Booking creation failed:", err);
-      setNotice("Booking saved to local CRM cache! (Remote server notification pending)");
-      setTimeout(() => router.push("/bookings"), 1800);
+      setError(
+        err instanceof Error
+          ? `Booking was NOT saved: ${err.message}. Please verify details and retry.`
+          : "Booking was NOT saved. Please verify details and retry.",
+      );
+      setNotice("");
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -1177,7 +1147,7 @@ export default function AddBookingPage() {
                               >
                                 <div className="font-bold text-slate-900">{c.name}</div>
                                 <div className="text-slate-500 text-[11px]">
-                                  {c.phone} • {c.nationality}
+                                  {formatPhoneDisplay(c.phone)} • {c.nationality}
                                 </div>
                               </div>
                             ))}
@@ -1213,18 +1183,10 @@ export default function AddBookingPage() {
                     <label className="mb-1 block text-xs font-bold text-slate-700">
                       Mobile / WhatsApp Number <span className="text-rose-500">*</span>
                     </label>
-                    <div className="flex h-10 overflow-hidden rounded-lg border border-slate-300 focus-within:border-blue-600">
-                      <span className="flex items-center gap-1 bg-slate-50 px-2.5 text-xs font-bold text-slate-600 border-r border-slate-200">
-                        <Flag className="h-3.5 w-3.5 text-emerald-600" /> +971
-                      </span>
-                      <input
-                        type="text"
-                        value={paxPhone.replace("+971 ", "")}
-                        onChange={(e) => setPaxPhone(`+971 ${e.target.value}`)}
-                        placeholder="50 123 4567"
-                        className="w-full px-3 text-sm font-medium outline-none"
-                      />
-                    </div>
+                    <PhoneInput
+                      value={paxPhone}
+                      onChange={(e164) => setPaxPhone(e164)}
+                    />
                   </div>
 
                   <div>
@@ -2446,7 +2408,21 @@ export default function AddBookingPage() {
                   <CreditCard className="h-5 w-5 text-blue-600" />
                   <h3 className="font-extrabold text-slate-900 text-lg">Financials & Billing Breakdown</h3>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1">
+                    <label className="text-xs font-bold text-slate-600">Booking Currency:</label>
+                    <select
+                      value={bookingCurrency}
+                      onChange={(e) => setBookingCurrency(e.target.value)}
+                      className="bg-transparent text-xs font-black text-slate-900 outline-none cursor-pointer"
+                    >
+                      {currencyOptions.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.code} - {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-800">
                     Net Profit: {formatMoney(calculatedProfit)} ({calculatedMarginPercent}% Margin)
                   </span>
@@ -2457,7 +2433,7 @@ export default function AddBookingPage() {
               <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
                 <div>
                   <label className="mb-1 block text-xs font-bold text-slate-700">
-                    Selling Price (AED) <span className="text-rose-500">*</span>
+                    Selling Price ({bookingCurrency}) <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="number"
@@ -2469,7 +2445,7 @@ export default function AddBookingPage() {
 
                 <div>
                   <label className="mb-1 block text-xs font-bold text-slate-700">
-                    Supplier / Net Cost (AED)
+                    Supplier / Net Cost ({bookingCurrency})
                   </label>
                   <input
                     type="number"
@@ -2480,7 +2456,7 @@ export default function AddBookingPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-700">Service Fee / Commission</label>
+                  <label className="mb-1 block text-xs font-bold text-slate-700">Service Fee / Commission ({bookingCurrency})</label>
                   <input
                     type="number"
                     value={serviceFee}
@@ -2490,7 +2466,7 @@ export default function AddBookingPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-700">Discount (AED)</label>
+                  <label className="mb-1 block text-xs font-bold text-slate-700">Discount ({bookingCurrency})</label>
                   <input
                     type="number"
                     value={discount}
@@ -2502,7 +2478,7 @@ export default function AddBookingPage() {
 
               <div className="mt-4 grid gap-4 sm:grid-cols-3">
                 <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-700">UAE VAT / Tax (%)</label>
+                  <label className="mb-1 block text-xs font-bold text-slate-700">Tax / VAT (%)</label>
                   <input
                     type="number"
                     value={taxRate}
@@ -2512,7 +2488,7 @@ export default function AddBookingPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-700">Amount Paid (AED)</label>
+                  <label className="mb-1 block text-xs font-bold text-slate-700">Amount Paid ({bookingCurrency})</label>
                   <input
                     type="number"
                     value={amountPaid}
@@ -2522,7 +2498,7 @@ export default function AddBookingPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-700">Balance Due (AED)</label>
+                  <label className="mb-1 block text-xs font-bold text-slate-700">Balance Due ({bookingCurrency})</label>
                   <div
                     className={`flex h-10 items-center rounded-lg border px-3 text-sm font-extrabold ${
                       calculatedBalanceDue > 0
@@ -2530,7 +2506,7 @@ export default function AddBookingPage() {
                         : "border-emerald-300 bg-emerald-50 text-emerald-700"
                     }`}
                   >
-                    {formatMoney(calculatedBalanceDue)}
+                    {bookingCurrency} {calculatedBalanceDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
               </div>
@@ -3164,7 +3140,7 @@ function AddCompanyModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="mb-1 block font-bold text-slate-700">Contact Person</label>
               <input
@@ -3173,6 +3149,13 @@ function AddCompanyModal({
                 onChange={(e) => setContactPerson(e.target.value)}
                 placeholder="e.g. Tariq Al Nuaimi"
                 className="h-9 w-full rounded-lg border border-slate-300 px-3 font-medium outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-bold text-slate-700">Contact Phone</label>
+              <PhoneInput
+                value={phone}
+                onChange={(e164) => setPhone(e164)}
               />
             </div>
             <div>
@@ -3261,7 +3244,7 @@ function AddEmployeeModal({
   const [passportNumber, setPassportNumber] = useState("");
   const [passportExpiry, setPassportExpiry] = useState("2030-01-01");
   const [nationality, setNationality] = useState("United Arab Emirates");
-  const [phone, setPhone] = useState("+971 50 ");
+  const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [dob, setDob] = useState("1990-01-01");
   const [gender, setGender] = useState("Male");
@@ -3270,6 +3253,14 @@ function AddEmployeeModal({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+    if (phone.trim()) {
+      const parsed = parsePhoneNumber(phone);
+      const val = validatePhoneNumber(parsed.country.iso, parsed.nationalNumber);
+      if (!val.isValid) {
+        alert(val.error || "Please enter a valid phone number according to country code.");
+        return;
+      }
+    }
     const newEmp: Employee = {
       id: `emp-${Date.now()}`,
       companyId,
@@ -3280,7 +3271,7 @@ function AddEmployeeModal({
       passportNumber: passportNumber.trim() || "E9910291",
       passportExpiry,
       nationality: nationality.trim() || "United Arab Emirates",
-      phone: phone.trim() || "+971 50 000 0000",
+      phone: phone.trim() || "+971500000000",
       email: email.trim() || `${name.toLowerCase().replace(/\s+/g, ".")}@corporate.ae`,
       dob,
       gender,
@@ -3390,12 +3381,9 @@ function AddEmployeeModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block font-bold text-slate-700">Mobile Number</label>
-              <input
-                type="text"
+              <PhoneInput
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+971 50 123 4567"
-                className="h-9 w-full rounded-lg border border-slate-300 px-3 font-medium outline-none"
+                onChange={(e164) => setPhone(e164)}
               />
             </div>
             <div>
@@ -3440,7 +3428,7 @@ function AddCustomerModal({
   onSave: (cust: Customer) => void;
 }) {
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("+971 50 ");
+  const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [nationality, setNationality] = useState("India");
   const [passportNumber, setPassportNumber] = useState("");
@@ -3452,10 +3440,18 @@ function AddCustomerModal({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+    if (phone.trim()) {
+      const parsed = parsePhoneNumber(phone);
+      const val = validatePhoneNumber(parsed.country.iso, parsed.nationalNumber);
+      if (!val.isValid) {
+        alert(val.error || "Please enter a valid phone number according to country code.");
+        return;
+      }
+    }
     const newCust: Customer = {
       id: `cust-${Date.now()}`,
       name: name.trim(),
-      phone: phone.trim() || "+971 50 123 4567",
+      phone: phone.trim() || "+971501234567",
       email: email.trim() || `${name.toLowerCase().replace(/\s+/g, ".")}@gmail.com`,
       nationality,
       passportNumber: passportNumber.trim() || "M8819201",
@@ -3493,12 +3489,9 @@ function AddCustomerModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block font-bold text-slate-700">Phone / WhatsApp</label>
-              <input
-                type="text"
+              <PhoneInput
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+971 50 123 4567"
-                className="h-9 w-full rounded-lg border border-slate-300 px-3 font-medium outline-none"
+                onChange={(e164) => setPhone(e164)}
               />
             </div>
             <div>
@@ -3595,7 +3588,7 @@ function CompanyProfileModal({
             </div>
             <div>
               <span className="text-[10px] font-bold uppercase text-slate-400">Phone</span>
-              <div className="font-medium text-slate-800">{company.phone}</div>
+              <div className="font-medium text-slate-800">{formatPhoneDisplay(company.phone)}</div>
             </div>
           </div>
 

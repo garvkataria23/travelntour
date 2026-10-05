@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { AuditModule } from './audit/audit.module';
 import { AutomationModule } from './automation/automation.module';
+import { BackupModule } from './backup/backup.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { BusinessesModule } from './businesses/businesses.module';
 import { CustomersModule } from './customers/customers.module';
@@ -14,6 +15,7 @@ import { HealthModule } from './health/health.module';
 import { IncomeModule } from './income/income.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { MessagesModule } from './messages/messages.module';
+import { PlatformModule } from './platform/platform.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { QueueModule } from './queue/queue.module';
 import { ReportsModule } from './reports/reports.module';
@@ -40,6 +42,7 @@ import { JwtAuthGuard } from './common/jwt-auth.guard';
     QueueModule,
     AuthModule,
     UsersModule,
+    PlatformModule,
     BusinessesModule,
     CustomersModule,
     BookingsModule,
@@ -54,6 +57,7 @@ import { JwtAuthGuard } from './common/jwt-auth.guard';
     IncomeModule,
     InvoicesModule,
     StorageModule,
+    BackupModule,
     CurrencyModule,
     HealthModule,
   ],

@@ -1,4 +1,4 @@
-import { Booking, Customer } from '@prisma/client';
+import { Booking } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AutomationService } from './automation.service';
 import { PrismaService } from '../prisma/prisma.service';

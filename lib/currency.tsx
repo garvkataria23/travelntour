@@ -4,9 +4,11 @@ import { createContext, ReactNode, useContext, useEffect, useMemo, useSyncExtern
 import { useApi } from "@/lib/hooks";
 import {
   BASE_CURRENCY,
+  CurrencyOption,
   RateTable,
   convertAmount,
   formatMoney,
+  getDefaultWorldCurrencies,
   getDisplayCurrency,
   getDisplayCurrencySnapshot,
   getRateTableSnapshot,
@@ -17,12 +19,7 @@ import {
   subscribeToCurrency,
 } from "@/lib/currency-core";
 
-export interface CurrencyOption {
-  code: string;
-  name: string;
-  fiat: boolean;
-  digits: 0 | 2 | 3;
-}
+export type { CurrencyOption };
 
 export interface CurrencyContextValue {
   /** Currency every amount in the UI is displayed in. */
@@ -51,8 +48,22 @@ export function CurrencyProvider({ children, businessCurrency }: { children: Rea
   const display = useSyncExternalStore(subscribeToCurrency, getDisplayCurrencySnapshot, getDisplayCurrencySnapshot);
   const rates = useSyncExternalStore(subscribeToCurrency, getRateTableSnapshot, getRateTableSnapshot);
 
-  const ratesQuery = useApi<RateTable>(RATES_PATH);
-  const listQuery = useApi<{ base: string; currencies: CurrencyOption[] }>(LIST_PATH);
+  const ratesQuery = useApi<RateTable>(RATES_PATH, { refetchInterval: 300000 });
+  const listQuery = useApi<{ base: string; currencies: CurrencyOption[] }>(LIST_PATH, { refetchInterval: 0 });
+
+  const defaultOptions = useMemo(() => getDefaultWorldCurrencies(), []);
+  const options = useMemo(() => {
+    const fromApi = listQuery.data?.currencies ?? [];
+    if (!fromApi.length) return defaultOptions;
+    const knownCodes = new Set(fromApi.map((c) => c.code));
+    const merged = [...fromApi];
+    for (const def of defaultOptions) {
+      if (!knownCodes.has(def.code)) {
+        merged.push(def);
+      }
+    }
+    return merged.sort((a, b) => Number(b.fiat) - Number(a.fiat) || a.code.localeCompare(b.code));
+  }, [listQuery.data?.currencies, defaultOptions]);
 
   useEffect(() => {
     initDisplayCurrency(businessCurrency);
@@ -72,12 +83,12 @@ export function CurrencyProvider({ children, businessCurrency }: { children: Rea
       error: ratesQuery.error,
       offline: ratesQuery.offline,
       refresh: ratesQuery.refetch,
-      options: listQuery.data?.currencies ?? [],
+      options,
       convert: (amount, to, from) => convertAmount(amount, to ?? display, from ?? BASE_CURRENCY),
       rate: (from, to) => rateBetween(from, to),
       money: (value_, currency) => formatMoney(value_, currency ?? display),
     }),
-    [display, rates, ratesQuery.loading, ratesQuery.error, ratesQuery.offline, ratesQuery.refetch, listQuery.data],
+    [display, rates, ratesQuery.loading, ratesQuery.error, ratesQuery.offline, ratesQuery.refetch, options],
   );
 
   return <CurrencyContext.Provider value={value}>{children}</CurrencyContext.Provider>;

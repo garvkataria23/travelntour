@@ -1,0 +1,19 @@
+# Docker context exclusions for the backend image.
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/.cache
+coverage
+.git
+.gitignore
+.github
+**/.env
+**/.env.*
+**/*.env
+**/.env*
+!**/.env.example
+**/*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.md

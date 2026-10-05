@@ -55,8 +55,8 @@ export class TemplatesService {
     user: AuthUser,
     query: { page?: number; limit?: number; search?: string; category?: string; status?: string },
   ) {
-    const page = Number(query.page) || 1;
-    const limit = Number(query.limit) || 20;
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(1000, Math.max(1, Number(query.limit) || 20));
     const where: Record<string, unknown> = { businessId: user.businessId };
     if (query.search) {
       where.OR = [{ name: { contains: query.search, mode: 'insensitive' as const } }];
