@@ -10,7 +10,7 @@ RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npx prisma generate && npm run build
+RUN rm -f *.tsbuildinfo && npx prisma generate && npm run build
 
 FROM node:22-alpine AS prod-deps
 RUN apk add --no-cache openssl libc6-compat

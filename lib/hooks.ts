@@ -29,12 +29,11 @@ export function useApi<T>(path: string | null, options: UseApiOptions = {}) {
   bodyRef.current = body;
 
   const [data, setData] = useState<T | null>(() => (path && isQuery ? getCachedGet<T>(path) : null));
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => (path && isQuery ? getCachedGet<T>(path) === null : true));
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const runId = useRef(0);
-  // Once we hold data, background revalidations must not flip `loading` back on: a list
-  // page would flash empty and an open edit modal would unmount and lose the user's typing.
+  const lastFetchedAt = useRef(0);
   const hasData = useRef(data !== null);
   const refetchRef = useRef<() => Promise<void>>(async () => {});
   const refetch = useCallback(async (): Promise<void> => {
@@ -47,18 +46,21 @@ export function useApi<T>(path: string | null, options: UseApiOptions = {}) {
       return;
     }
     const id = ++runId.current;
-    if (!hasData.current) setLoading(true);
     setError(null);
 
     const precached = isQuery ? getCachedGet<T>(path) : null;
     if (precached !== null && precached !== undefined) {
       setData(precached);
       hasData.current = true;
+      setLoading(false);
+    } else if (!hasData.current) {
+      setLoading(true);
     }
 
     try {
       const result = await api<T>(path, { method, body: bodyRef.current, auth: true });
       if (runId.current !== id) return;
+      lastFetchedAt.current = Date.now();
       setData(result);
       hasData.current = true;
       setLoading(false);
@@ -77,9 +79,6 @@ export function useApi<T>(path: string | null, options: UseApiOptions = {}) {
         setLoading(false);
       }
     }
-  // `bodyKey` is intentionally the dependency rather than the ref: a ref does not trigger
-  // re-creation of the callback, so the effect below would never re-run when the request body
-  // changes. The ref exists only to avoid re-subscribing on body *identity*.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, method, isQuery, bodyKey]);
 
@@ -114,11 +113,11 @@ export function useApi<T>(path: string | null, options: UseApiOptions = {}) {
     };
   }, [path, isQuery]);
 
-  // Adaptive polling fallback: only poll when refetchInterval is not explicitly 0
+  // Adaptive polling: ONLY poll when refetchInterval > 0 is explicitly requested, with a 30s floor
   useEffect(() => {
     if (!path || !isQuery) return;
-    if (refetchInterval === 0) return;
-    const interval = typeof refetchInterval === "number" && refetchInterval > 0 ? refetchInterval : 5000;
+    if (typeof refetchInterval !== "number" || refetchInterval <= 0) return;
+    const interval = Math.max(refetchInterval, 30000);
     const id = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
       refetchRef.current();
@@ -126,22 +125,23 @@ export function useApi<T>(path: string | null, options: UseApiOptions = {}) {
     return () => window.clearInterval(id);
   }, [refetchInterval, path, isQuery]);
 
-  // A tab left open in the background is usually stale the moment it comes back, and staff
-  // switch between booking and WhatsApp constantly.
+  // Debounced visibility/focus refresh (only if data is older than 20 seconds)
   useEffect(() => {
     if (!path || !isQuery) return;
-    const onVisible = () => {
-      if (document.visibilityState === "visible") refetchRef.current();
+    const maybeRefetch = () => {
+      if (Date.now() - lastFetchedAt.current < 20000) return;
+      refetchRef.current();
     };
-    const onFocus = () => refetchRef.current();
-    const onOnline = () => refetchRef.current();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") maybeRefetch();
+    };
     document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("online", onOnline);
+    window.addEventListener("focus", maybeRefetch);
+    window.addEventListener("online", maybeRefetch);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("online", onOnline);
+      window.removeEventListener("focus", maybeRefetch);
+      window.removeEventListener("online", maybeRefetch);
     };
   }, [path, isQuery]);
 

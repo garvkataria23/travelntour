@@ -127,6 +127,14 @@ import {
 import { api, clearSession, getStoredUser, hasActiveSession, setSession, ApiUser, ApiSession } from "@/lib/api";
 import { StaffRoleManager } from "@/components/admin/staff-role-manager";
 import { authenticateStaffCredentials, getStoredStaff, hydrateSessionWithStaffPermissions } from "@/lib/staff-management";
+import {
+  DRIVE_OAUTH_CHANNEL,
+  DRIVE_OAUTH_STORAGE_KEY,
+  GoogleDriveConnectModal,
+  GoogleGLogo,
+  type DriveOAuthPopupMessage,
+  type StorageResponse,
+} from "@/components/backup/google-drive-connect-modal";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -393,6 +401,8 @@ export default function MasterAdminPage() {
   const [inspectModalOpen, setInspectModalOpen] = useState(false);
   const [selectedError, setSelectedError] = useState<SystemDiagnosticError | null>(null);
   const [retryActionMsg, setRetryActionMsg] = useState<{ id: string; text: string } | null>(null);
+  const [driveModalOpen, setDriveModalOpen] = useState(false);
+  const [driveStatus, setDriveStatus] = useState<StorageResponse | null>(null);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Toast helper
@@ -449,6 +459,9 @@ export default function MasterAdminPage() {
     void fetchAdminAccounts()
       .then(setAccounts)
       .catch((err) => showToast((err as Error).message, "error"));
+    void api<StorageResponse>("/backups/storage", { skipCache: true })
+      .then(setDriveStatus)
+      .catch(() => undefined);
     setBranches(getStoredBranches());
     setCompanies(getStoredCompanies());
     setDiagnostics(getDiagnosticErrors());
@@ -458,6 +471,67 @@ export default function MasterAdminPage() {
     setCustomLimitInput(q.limit.toString());
     setCustomWarningInput(q.warningThreshold.toString());
     setCustomCriticalInput(q.criticalThreshold.toString());
+  }, [showToast]);
+
+  // Listen for Google OAuth popup or redirect outcome in SuperAdmin
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const applyDriveOutcome = (connected?: string | null, driveError?: string | null, code?: string | null) => {
+      if (connected) {
+        showToast(`Google Drive connected as ${connected}`);
+        void api<StorageResponse>("/backups/storage", { skipCache: true })
+          .then(setDriveStatus)
+          .catch(() => undefined);
+      } else if (driveError) {
+        showToast(driveError, "error");
+        setDriveModalOpen(true);
+      } else if (code === "DENIED") {
+        showToast("Google sign-in was declined.", "error");
+      }
+    };
+
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("driveConnected");
+    const driveError = params.get("driveError");
+    const code = params.get("code");
+    if (connected || driveError || code) {
+      applyDriveOutcome(connected, driveError, code);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== DRIVE_OAUTH_STORAGE_KEY || !event.newValue) return;
+      try {
+        const msg = JSON.parse(event.newValue) as DriveOAuthPopupMessage;
+        if (msg?.type === "FC_DRIVE_OAUTH_RESULT") {
+          applyDriveOutcome(msg.connected, msg.driveError, msg.code);
+        }
+      } catch {
+        // Ignore
+      }
+    };
+
+    let bc: BroadcastChannel | null = null;
+    if ("BroadcastChannel" in window) {
+      try {
+        bc = new BroadcastChannel(DRIVE_OAUTH_CHANNEL);
+        bc.onmessage = (event) => {
+          const msg = event.data as DriveOAuthPopupMessage | undefined;
+          if (msg?.type === "FC_DRIVE_OAUTH_RESULT") {
+            applyDriveOutcome(msg.connected, msg.driveError, msg.code);
+          }
+        };
+      } catch {
+        bc = null;
+      }
+    }
+
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      bc?.close();
+    };
   }, [showToast]);
 
   useEffect(() => {
@@ -524,19 +598,18 @@ export default function MasterAdminPage() {
 
     try {
       let sessionRes: ApiSession | null = null;
+      const cleanEmail = loginEmail.trim().toLowerCase();
       try {
+        sessionRes = authenticateStaffCredentials(cleanEmail, loginPass);
+      } catch {
         const res = await api<ApiSession>("/auth/login", {
           method: "POST",
           auth: false,
-          body: { email: loginEmail.trim().toLowerCase(), password: loginPass },
+          body: { email: cleanEmail, password: loginPass },
         });
         if (res?.accessToken && res?.user) {
           sessionRes = hydrateSessionWithStaffPermissions(res);
         }
-      } catch {
-        // Fallback to hybrid staff registry for Super Admin login
-        const fallback = authenticateStaffCredentials(loginEmail.trim().toLowerCase(), loginPass);
-        sessionRes = fallback;
       }
 
       if (sessionRes?.accessToken && sessionRes?.user) {
@@ -1299,6 +1372,27 @@ export default function MasterAdminPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setDriveModalOpen(true)}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-extrabold shadow-xs transition ${
+                driveStatus?.destination && !driveStatus.destination.broken
+                  ? "border-emerald-200 bg-emerald-50/70 text-emerald-800 hover:bg-emerald-100/80"
+                  : "border-blue-200 bg-white text-slate-800 hover:border-blue-400 hover:bg-blue-50/40"
+              }`}
+              title="Connect Google account via popup for Drive backups"
+            >
+              <GoogleGLogo className="h-3.5 w-3.5 shrink-0" />
+              {driveStatus?.destination && !driveStatus.destination.broken ? (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="max-w-[160px] truncate">{driveStatus.destination.accountEmail}</span>
+                </>
+              ) : (
+                <span>Sign in with Google</span>
+              )}
+            </button>
+
             <button
               onClick={refreshData}
               className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-800 transition"
@@ -2372,6 +2466,57 @@ export default function MasterAdminPage() {
                   <p className="mt-0.5 text-[11px] text-slate-400">{item.sub}</p>
                 </div>
               ))}
+            </div>
+
+            <div className="rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50/60 via-white to-indigo-50/40 p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-xs">
+                    <GoogleGLogo className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-extrabold text-slate-900">
+                        Google Drive Backup Account (OAuth Popup)
+                      </h3>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${
+                          driveStatus?.destination && !driveStatus.destination.broken
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {driveStatus?.destination && !driveStatus.destination.broken
+                          ? `Connected: ${driveStatus.destination.accountEmail}`
+                          : "Not Connected"}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-600">
+                      Connect a Google account directly via popup to store encrypted FlyConnect backup archives in your Google Drive.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDriveModalOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-extrabold text-slate-800 shadow-xs transition hover:border-blue-400 hover:bg-blue-50/40"
+                  >
+                    <GoogleGLogo className="h-4 w-4" />
+                    {driveStatus?.destination && !driveStatus.destination.broken
+                      ? "Manage Google Account"
+                      : "Sign in with Google (Popup)"}
+                  </button>
+                  <Link
+                    href="/settings"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-blue-700"
+                  >
+                    <span>Backup Settings</span>
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              </div>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -4280,6 +4425,12 @@ export default function MasterAdminPage() {
           </div>
         </div>
       )}
+
+      <GoogleDriveConnectModal
+        open={driveModalOpen}
+        onClose={() => setDriveModalOpen(false)}
+        onStatusChange={setDriveStatus}
+      />
     </div>
   );
 }

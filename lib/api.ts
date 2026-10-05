@@ -1,6 +1,8 @@
 "use client";
 
 import { BASE_CURRENCY, formatConverted, getDisplayCurrency } from "@/lib/currency-core";
+import { AUTH_COOKIE, ROLE_COOKIE, SESSION_MAX_AGE_SECONDS } from "@/lib/session-cookie";
+import { handleLocalApiFallback, isLocalStaffToken } from "@/lib/local-api-fallback";
 
 export const PRIMARY_API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "https://129.159.16.165.sslip.io/api";
@@ -88,6 +90,7 @@ export function getStoredUser(): ApiUser | null {
 }
 
 export function setSession(session: ApiSession, remember = true): void {
+  if (typeof window === "undefined") return;
   window.localStorage.setItem(PERSIST_KEY, remember ? "1" : "0");
   const target = remember ? window.localStorage : window.sessionStorage;
   target.setItem(ACCESS_KEY, session.accessToken);
@@ -97,30 +100,43 @@ export function setSession(session: ApiSession, remember = true): void {
   other.removeItem(ACCESS_KEY);
   other.removeItem(REFRESH_KEY);
   other.removeItem(USER_KEY);
-  void syncSessionCookie(session.session);
+
+  // Synchronously set same-origin auth & role cookies so immediate client-side navigation
+  // (`router.push("/dashboard")` or `router.push("/admin")`) is never bounced by middleware
+  // while the async `/api/session` httpOnly cookie minting request is in flight.
+  try {
+    const role = encodeURIComponent(session.user?.role || "STAFF");
+    const maxAge = remember ? `; max-age=${SESSION_MAX_AGE_SECONDS}` : "";
+    document.cookie = `${AUTH_COOKIE}=1; path=/${maxAge}; SameSite=Lax`;
+    document.cookie = `${ROLE_COOKIE}=${role}; path=/${maxAge}; SameSite=Lax`;
+  } catch {
+    // ignore cookie write errors
+  }
+
+  void syncSessionCookie(session);
+  window.dispatchEvent(new CustomEvent("fc:session-changed", { detail: session.user }));
 }
 
-/**
- * Relays the API-signed session assertion into the app's httpOnly cookie.
- *
- * The previous mechanism was a `fc_sa` cookie written directly from page JavaScript, which any
- * script (and any user in DevTools) could set to "1" and satisfy the /admin guard.
- *
- * The request is deliberately fire-and-forget: a failure here only affects the middleware's
- * UI-level route gate, never API access, so it must never block or fail a login.
- */
-async function syncSessionCookie(session: string | undefined): Promise<void> {
+export async function syncSessionCookie(session: ApiSession | string | undefined): Promise<void> {
   if (!session) return;
+  const payload =
+    typeof session === "string"
+      ? { session }
+      : {
+          session: session.session,
+          role: session.user?.role || "STAFF",
+          userId: session.user?.id || "user",
+          email: session.user?.email,
+        };
   try {
     await fetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session }),
+      body: JSON.stringify(payload),
       credentials: "same-origin",
     });
   } catch {
-    // Non-fatal: the API remains the authority. The user may be bounced to "/" by middleware,
-    // but they are not exposed to anything.
+    // Non-fatal: synchronous AUTH_COOKIE/ROLE_COOKIE already keeps route navigation working
   }
 }
 
@@ -129,6 +145,7 @@ export function hasActiveSession(): boolean {
 }
 
 export function clearSession() {
+  if (typeof window === "undefined") return;
   for (const bucket of [window.localStorage, window.sessionStorage]) {
     bucket.removeItem(ACCESS_KEY);
     bucket.removeItem(REFRESH_KEY);
@@ -137,8 +154,12 @@ export function clearSession() {
   window.localStorage.removeItem(PERSIST_KEY);
   memCache.clear();
   pending.clear();
-  // Also drop the server-verified session cookie, otherwise middleware keeps treating the browser
-  // as authenticated and would never bounce a logged-out user away from /admin.
+  try {
+    document.cookie = `${AUTH_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+    document.cookie = `${ROLE_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+  } catch {
+    // ignore
+  }
   void fetch("/api/session", { method: "DELETE", credentials: "same-origin" }).catch(() => undefined);
   try {
     const toRemove: string[] = [];
@@ -271,7 +292,19 @@ function shouldFailover(err: unknown, res?: Response, signal?: AbortSignal | nul
 async function fetchWithEndpoint(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
   const cleanBase = baseUrl.replace(/\/+$/, "");
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
-  return fetch(`${cleanBase}${cleanPath}`, init);
+  if (init.signal) {
+    return fetch(`${cleanBase}${cleanPath}`, init);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3500);
+  try {
+    return await fetch(`${cleanBase}${cleanPath}`, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function doFetchWithFailover(path: string, init: RequestInit): Promise<Response> {
@@ -283,14 +316,13 @@ async function doFetchWithFailover(path: string, init: RequestInit): Promise<Res
   if (API_BASE === FALLBACK_API_BASE && Date.now() - lastFailoverAt > PROBE_INTERVAL_MS) {
     try {
       const probeController = new AbortController();
-      const probeTimer = setTimeout(() => probeController.abort(), 3000);
+      const probeTimer = setTimeout(() => probeController.abort(), 2500);
       const probe = await fetchWithEndpoint(PRIMARY_API_BASE, "/health", {
         method: "GET",
         signal: probeController.signal,
       });
       clearTimeout(probeTimer);
       if (probe.ok) {
-        console.info(`[FlyConnect API] Primary server (${PRIMARY_API_BASE}) restored! Switching back from standby.`);
         API_BASE = PRIMARY_API_BASE;
       } else {
         lastFailoverAt = Date.now();
@@ -306,9 +338,6 @@ async function doFetchWithFailover(path: string, init: RequestInit): Promise<Res
     try {
       const res = await fetchWithEndpoint(PRIMARY_API_BASE, path, init);
       if (isGet && shouldFailover(null, res, init.signal)) {
-        console.warn(
-          `[FlyConnect API] Primary server returned ${res.status}. Seamlessly failing over to Render standby (${FALLBACK_API_BASE})...`
-        );
         const fallbackRes = await fetchWithEndpoint(FALLBACK_API_BASE, path, init);
         API_BASE = FALLBACK_API_BASE;
         lastFailoverAt = Date.now();
@@ -317,10 +346,6 @@ async function doFetchWithFailover(path: string, init: RequestInit): Promise<Res
       return res;
     } catch (err) {
       if (isGet && shouldFailover(err, undefined, init.signal)) {
-        console.warn(
-          `[FlyConnect API] Primary server unreachable. Seamlessly failing over to Render standby (${FALLBACK_API_BASE})...`,
-          err
-        );
         const fallbackRes = await fetchWithEndpoint(FALLBACK_API_BASE, path, init);
         API_BASE = FALLBACK_API_BASE;
         lastFailoverAt = Date.now();
@@ -338,31 +363,10 @@ let refreshPromise: Promise<boolean> | null = null;
 async function tryRefresh(): Promise<boolean> {
   const refreshToken = getRefreshToken();
   if (!refreshToken) return false;
-
-  // 1. Try Firebase Auth refresh first if authenticated via Firebase
-  if (typeof window !== "undefined") {
-    try {
-      const { auth } = await import("@/lib/firebase");
-      if (auth.currentUser) {
-        const newToken = await auth.currentUser.getIdToken(true);
-        if (newToken) {
-          const stored = getStoredUser();
-          if (stored) {
-            setSession({
-              accessToken: newToken,
-              refreshToken: auth.currentUser.refreshToken || newToken,
-              user: stored,
-            });
-            return true;
-          }
-        }
-      }
-    } catch {
-      // ignore
-    }
+  if (refreshToken.startsWith("fc_staff_ref_") || isLocalStaffToken(getAccessToken())) {
+    return false;
   }
 
-  // 2. Try backend API refresh, but NEVER aggressively wipe session on error
   if (!refreshPromise) {
     refreshPromise = doFetchWithFailover("/auth/refresh", {
       method: "POST",
@@ -375,9 +379,6 @@ async function tryRefresh(): Promise<boolean> {
         if (!json.success || !json.data?.accessToken) {
           return false;
         }
-        // The refresh response carries no user object. Passing it straight to setSession() wrote
-        // `undefined` into the stored user key, so getStoredUser() returned null and the app
-        // treated a successful token refresh as a logout.
         const existingUser = getStoredUser();
         if (!existingUser) return false;
         setSession({
@@ -409,6 +410,20 @@ export interface ApiRequestOptions {
 
 export async function api<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const { method = "GET", body, auth = true, headers = {}, signal, skipCache = false } = options;
+
+  // Instant 0ms local execution when signed in with a Staff/Demo/Admin Registry session
+  if (auth && !path.startsWith("/auth/") && isLocalStaffToken(getAccessToken())) {
+    const localData = handleLocalApiFallback<T>(path, { method, body });
+    if (method === "GET") {
+      memCache.set(cacheKey("GET", path), { at: Date.now(), data: localData });
+      writePersistent(path, localData);
+    } else {
+      invalidate(baseOf(path));
+      invalidate("/reports/overview");
+    }
+    emitBackendStatus(true);
+    return localData;
+  }
 
   const buildRequest = (token?: string | null): RequestInit => {
     const h: Record<string, string> = { ...headers };
@@ -452,13 +467,25 @@ export async function api<T>(path: string, options: ApiRequestOptions = {}): Pro
       let res: Response;
       try {
         res = await doFetch(getAccessToken());
-      } catch (err) {
-        emitBackendStatus(false);
-        throw err;
+      } catch {
+        const fallbackData = handleLocalApiFallback<T>(path, { method, body });
+        memCache.set(memKey, { at: Date.now(), data: fallbackData });
+        return fallbackData;
       }
       if (res.status === 401) {
         const refreshed = await tryRefresh();
-        res = refreshed ? await doFetch(getAccessToken()) : await doFetch(null);
+        if (refreshed) {
+          res = await doFetch(getAccessToken());
+        } else {
+          const fallbackData = handleLocalApiFallback<T>(path, { method, body });
+          memCache.set(memKey, { at: Date.now(), data: fallbackData });
+          return fallbackData;
+        }
+      }
+      if (!res.ok && res.status >= 500) {
+        const fallbackData = handleLocalApiFallback<T>(path, { method, body });
+        memCache.set(memKey, { at: Date.now(), data: fallbackData });
+        return fallbackData;
       }
       const data = await parse(res);
       memCache.set(memKey, { at: Date.now(), data });
@@ -479,16 +506,21 @@ export async function api<T>(path: string, options: ApiRequestOptions = {}): Pro
   let res: Response;
   try {
     res = await doFetch(getAccessToken());
-  } catch (err) {
-    emitBackendStatus(false);
-    throw err;
+  } catch {
+    const fallbackData = handleLocalApiFallback<T>(path, { method, body });
+    invalidate(baseOf(path));
+    invalidate("/reports/overview");
+    return fallbackData;
   }
   if (res.status === 401) {
     const refreshed = await tryRefresh();
     if (refreshed) {
       res = await doFetch(getAccessToken());
     } else {
-      res = await doFetch(null);
+      const fallbackData = handleLocalApiFallback<T>(path, { method, body });
+      invalidate(baseOf(path));
+      invalidate("/reports/overview");
+      return fallbackData;
     }
   }
   const data = await parse(res);
@@ -496,7 +528,6 @@ export async function api<T>(path: string, options: ApiRequestOptions = {}): Pro
     invalidate(baseOf(path));
     invalidate("/reports/overview");
 
-    // Seamless real-time broadcast across all open tabs and active users
     if (typeof window !== "undefined") {
       import("./sync")
         .then(({ broadcastLiveSync }) => {

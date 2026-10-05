@@ -11,10 +11,19 @@ import {
   getStoredStaff,
   hydrateSessionWithStaffPermissions,
 } from "@/lib/staff-management";
+import {
+  DRIVE_OAUTH_POPUP_NAME,
+  broadcastDriveOAuthResult,
+} from "@/components/backup/google-drive-connect-modal";
 
 export function LoginPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const [oauthPopupResult, setOauthPopupResult] = useState<{
+    connected?: string | null;
+    driveError?: string | null;
+    code?: string | null;
+  } | null>(null);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [remember, setRemember] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
@@ -57,18 +66,59 @@ export function LoginPage() {
   }
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("driveConnected");
+    const driveError = params.get("driveError");
+    const code = params.get("code");
+
+    if (connected || driveError || code) {
+      broadcastDriveOAuthResult({ connected, driveError, code });
+      const isPopup =
+        window.name === DRIVE_OAUTH_POPUP_NAME || Boolean(window.opener && !window.opener.closed);
+      if (isPopup) {
+        setOauthPopupResult({ connected, driveError, code });
+        const timer = window.setTimeout(() => {
+          try {
+            window.close();
+          } catch {
+            // Browser may require user click
+          }
+        }, 600);
+        return () => window.clearTimeout(timer);
+      }
+    }
+
     setStaffAccounts(getStoredStaff().filter((m) => m.status === "ACTIVE"));
     if (hasActiveSession()) {
       const stored = getStoredUser();
+      const suffix = connected || driveError || code ? window.location.search : "";
       if (stored?.role === "SUPER_ADMIN") {
-        router.replace("/admin");
+        router.replace(`/admin${suffix}`);
       } else {
-        router.replace("/dashboard");
+        router.replace(`/dashboard${suffix}`);
       }
     } else {
       setReady(true);
     }
   }, [router]);
+
+  function handleInstantRoleLogin(acc: StaffMember) {
+    setError("");
+    setFieldErrors({});
+    setUserId(acc.email);
+    setPassword(acc.password || "Staff@123");
+    try {
+      const staffSession = authenticateStaffCredentials(acc.email, acc.password || "Staff@123");
+      setSession(staffSession, remember);
+      if (staffSession.user?.businessId && typeof window !== "undefined") {
+        window.localStorage.setItem("fc_business_id", staffSession.user.businessId);
+      }
+      setMessage(`Signed in as ${staffSession.user.name} (${staffSession.user.role}). Redirecting...`);
+      router.push(staffSession.user?.role === "SUPER_ADMIN" ? "/admin" : "/dashboard");
+    } catch (err: any) {
+      setError(err?.message || "Unable to sign in with selected role account.");
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -104,7 +154,26 @@ export function LoginPage() {
         }
       } else {
         const cleanEmail = userId.trim().toLowerCase();
-        // 1. Try backend API authentication first
+
+        // 1. Instant 0ms check against Staff & Admin Role Registry first so Demo & Staff logins never wait on network timeouts
+        try {
+          const staffSession = authenticateStaffCredentials(cleanEmail, password);
+          setSession(staffSession, remember);
+          if (staffSession.user?.businessId && typeof window !== "undefined") {
+            window.localStorage.setItem("fc_business_id", staffSession.user.businessId);
+          }
+          setMessage(`Signed in as ${staffSession.user.name} (${staffSession.user.role}).`);
+          router.push(staffSession.user?.role === "SUPER_ADMIN" ? "/admin" : "/dashboard");
+          return;
+        } catch (staffErr: any) {
+          // If the account exists in staff registry and is explicitly suspended/inactive, stop immediately
+          if (staffErr?.message && staffErr.message.includes("suspended")) {
+            setError(staffErr.message);
+            return;
+          }
+        }
+
+        // 2. Otherwise try remote backend API authentication
         try {
           const res = await api<ApiSession>("/auth/login", {
             method: "POST",
@@ -121,21 +190,9 @@ export function LoginPage() {
             router.push(enriched.user?.role === "SUPER_ADMIN" ? "/admin" : "/dashboard");
             return;
           }
-        } catch {
-          // 2. Fallback to Staff & Role Registry authentication (supports browser-provisioned staff & offline mode)
-          try {
-            const staffSession = authenticateStaffCredentials(cleanEmail, password);
-            setSession(staffSession, remember);
-            if (staffSession.user?.businessId && typeof window !== "undefined") {
-              window.localStorage.setItem("fc_business_id", staffSession.user.businessId);
-            }
-            setMessage(`Signed in as ${staffSession.user.name} (${staffSession.user.role}).`);
-            router.push(staffSession.user?.role === "SUPER_ADMIN" ? "/admin" : "/dashboard");
-            return;
-          } catch (staffErr: any) {
-            setError(staffErr?.message || "Invalid email or password. Please verify and retry.");
-            return;
-          }
+        } catch (apiErr: any) {
+          setError(apiErr?.message || "Invalid email or password. Please verify and retry.");
+          return;
         }
       }
     } catch {
@@ -167,6 +224,38 @@ export function LoginPage() {
         setForgotEmail("");
       }, 4000);
     }
+  }
+
+  if (oauthPopupResult) {
+    const isSuccess = Boolean(oauthPopupResult.connected);
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-slate-900">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-lg">
+          <div
+            className={`mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full ${
+              isSuccess ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
+            }`}
+          >
+            <Check className="h-6 w-6" />
+          </div>
+          <h1 className="text-lg font-extrabold text-slate-900">
+            {isSuccess ? "Google Drive Connected" : "Google Sign-In Finished"}
+          </h1>
+          <p className="mt-1.5 text-xs text-slate-600">
+            {isSuccess
+              ? `Connected as ${oauthPopupResult.connected}. You can return to the SuperAdmin window.`
+              : oauthPopupResult.driveError || "Google access was not granted."}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.close()}
+            className="mt-4 inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700"
+          >
+            Close Popup Window
+          </button>
+        </div>
+      </main>
+    );
   }
 
   if (!ready) return null;
@@ -291,6 +380,35 @@ export function LoginPage() {
                 {loading ? (mode === "login" ? "Logging in..." : "Creating Account...") : (mode === "login" ? "Login" : "Sign Up")}
                 <ArrowRight className="h-5 w-5" />
               </button>
+
+              {mode === "login" && staffAccounts.length > 0 && (
+                <div className="grid grid-cols-2 gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const adminAcc =
+                        staffAccounts.find((a) => a.role === "ADMIN") || staffAccounts[0];
+                      if (adminAcc) handleInstantRoleLogin(adminAcc);
+                    }}
+                    className="flex h-11 items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/90 px-3 text-xs font-extrabold text-blue-700 transition hover:bg-blue-100"
+                  >
+                    <KeyRound className="h-3.5 w-3.5" />
+                    Demo Agency Sign In
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const superAcc =
+                        staffAccounts.find((a) => a.role === "SUPER_ADMIN") || staffAccounts[0];
+                      if (superAcc) handleInstantRoleLogin(superAcc);
+                    }}
+                    className="flex h-11 items-center justify-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50/90 px-3 text-xs font-extrabold text-violet-800 transition hover:bg-violet-100"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Super Admin Sign In
+                  </button>
+                </div>
+              )}
             </form>
 
             <div className="mt-4 text-center">
@@ -339,7 +457,7 @@ export function LoginPage() {
                   </button>
                 </div>
                 {showRoleAccounts && (
-                  <div className="mt-2.5 max-h-48 space-y-1.5 overflow-y-auto pr-1">
+                  <div className="mt-2.5 max-h-56 space-y-1.5 overflow-y-auto pr-1">
                     {staffAccounts.map((acc) => (
                       <div
                         key={acc.id}
@@ -368,18 +486,27 @@ export function LoginPage() {
                             {acc.email} • Pwd: {acc.password || "Staff@123"}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setUserId(acc.email);
-                            setPassword(acc.password || "Staff@123");
-                            setError("");
-                            setMessage(`Filled credentials for ${acc.name} (${acc.role}). Click Login!`);
-                          }}
-                          className="shrink-0 rounded-lg bg-blue-50 px-2.5 py-1.5 text-[11px] font-extrabold text-blue-700 hover:bg-blue-100 transition"
-                        >
-                          Use Login
-                        </button>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUserId(acc.email);
+                              setPassword(acc.password || "Staff@123");
+                              setError("");
+                              setMessage(`Filled credentials for ${acc.name} (${acc.role}).`);
+                            }}
+                            className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-100 transition"
+                          >
+                            Fill
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleInstantRoleLogin(acc)}
+                            className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-extrabold text-white hover:bg-blue-700 transition"
+                          >
+                            Sign In →
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>

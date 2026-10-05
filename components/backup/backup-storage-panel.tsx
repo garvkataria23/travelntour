@@ -4,6 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Cloud, ExternalLink, FolderOpen, HardDrive, Link2Off, Loader2, RefreshCw, Unlink } from "lucide-react";
 import { api } from "@/lib/api";
 import { hasPermission } from "@/lib/permissions";
+import {
+  DRIVE_OAUTH_CHANNEL,
+  DRIVE_OAUTH_STORAGE_KEY,
+  GoogleGLogo,
+  connectGoogleDriveViaPopup,
+  type DriveOAuthPopupMessage,
+} from "./google-drive-connect-modal";
 
 /**
  * Live storage panel and Drive account management.
@@ -83,42 +90,87 @@ export function BackupStoragePanel() {
     void load();
   }, [load]);
 
-  // The Google consent screen sends the browser back here, so the outcome has to be read out of the
-  // URL. Without this an operator clicks "Connect" and returns to a panel that looks unchanged,
-  // with no idea whether it worked.
+  // Handle both direct URL query params and popup completion messages.
   useEffect(() => {
+    const applyOutcome = (connected?: string | null, driveError?: string | null, code?: string | null) => {
+      setConnecting(false);
+      if (connected) {
+        setError(null);
+        setNotice(`Google Drive connected as ${connected}. Archives will be written there.`);
+        void load();
+      } else if (driveError) {
+        setError(driveError);
+      } else if (code === "DENIED") {
+        setError("Google access was declined. Nothing was changed.");
+      }
+    };
+
     const params = new URLSearchParams(window.location.search);
     const connected = params.get("driveConnected");
     const driveError = params.get("driveError");
     const code = params.get("code");
 
-    if (connected) {
-      setNotice(`Google Drive connected as ${connected}. Archives will be written there.`);
-      // Clean the URL so a refresh does not repeat the message.
-      window.history.replaceState({}, "", window.location.pathname);
-      void load();
-    } else if (driveError) {
-      setError(driveError);
-      window.history.replaceState({}, "", window.location.pathname);
-    } else if (code === "DENIED") {
-      setError("Google access was declined. Nothing was changed.");
+    if (connected || driveError || code === "DENIED") {
+      applyOutcome(connected, driveError, code);
       window.history.replaceState({}, "", window.location.pathname);
     }
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== DRIVE_OAUTH_STORAGE_KEY || !event.newValue) return;
+      try {
+        const msg = JSON.parse(event.newValue) as DriveOAuthPopupMessage;
+        if (msg?.type === "FC_DRIVE_OAUTH_RESULT") {
+          applyOutcome(msg.connected, msg.driveError, msg.code);
+        }
+      } catch {
+        // Ignore
+      }
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const msg = event.data as DriveOAuthPopupMessage | undefined;
+      if (msg?.type === "FC_DRIVE_OAUTH_RESULT") {
+        applyOutcome(msg.connected, msg.driveError, msg.code);
+      }
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("message", onMessage);
+
+    let bc: BroadcastChannel | null = null;
+    if ("BroadcastChannel" in window) {
+      try {
+        bc = new BroadcastChannel(DRIVE_OAUTH_CHANNEL);
+        bc.onmessage = (event) => {
+          const msg = event.data as DriveOAuthPopupMessage | undefined;
+          if (msg?.type === "FC_DRIVE_OAUTH_RESULT") {
+            applyOutcome(msg.connected, msg.driveError, msg.code);
+          }
+        };
+      } catch {
+        bc = null;
+      }
+    }
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("message", onMessage);
+      bc?.close();
+    };
   }, [load]);
 
   async function connect() {
     setConnecting(true);
     setError(null);
+    setNotice(null);
     try {
-      const { authorizationUrl } = await api<{ authorizationUrl: string }>(
-        "/backups/destination/google/connect",
-        { method: "POST" },
-      );
-      // A full navigation, not fetch: the Google consent screen cannot be rendered in an iframe or
-      // fetched. The nonce travels in the URL and is checked when Google returns.
-      window.location.href = authorizationUrl;
+      const connected = await connectGoogleDriveViaPopup();
+      setNotice(`Google Drive connected as ${connected.accountEmail}. Archives will be written there.`);
+      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the connect flow");
+    } finally {
       setConnecting(false);
     }
   }
@@ -309,14 +361,16 @@ export function BackupStoragePanel() {
                 type="button"
                 onClick={() => void connect()}
                 disabled={connecting}
-                className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-[#1688f9] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#0f74d6] disabled:opacity-50"
+                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-[#1688f9] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#0f74d6] disabled:opacity-50"
               >
                 {connecting ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Cloud className="h-3.5 w-3.5" />
+                  <span className="flex h-4 w-4 items-center justify-center rounded-xs bg-white p-0.5">
+                    <GoogleGLogo className="h-3 w-3" />
+                  </span>
                 )}
-                Connect Google Drive
+                Connect Google Drive (Popup)
               </button>
             ) : null}
           </div>

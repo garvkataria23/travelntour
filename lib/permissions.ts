@@ -1,6 +1,20 @@
 "use client";
 
-import { getStoredUser, type ApiUser } from "@/lib/api";
+import type { ApiUser } from "@/lib/api";
+
+function getStoredUser(): ApiUser | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const store =
+      window.localStorage.getItem("fc_persist") === "1"
+        ? window.localStorage
+        : window.sessionStorage;
+    const raw = store.getItem("fc_user") ?? window.sessionStorage.getItem("fc_user");
+    return raw ? (JSON.parse(raw) as ApiUser) : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Frontend permission helpers.

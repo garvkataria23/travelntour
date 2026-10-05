@@ -255,4 +255,39 @@ describe('Google Drive connect flow', () => {
       await expect(h.controller.storage(STAFF)).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
+
+  describe('popup exchange', () => {
+    it('refuses a tenant admin and staff', async () => {
+      const h = makeController();
+      await expect(
+        h.controller.exchangeGoogleCode(ADMIN, { code: 'popup-code' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        h.controller.exchangeGoogleCode(STAFF, { code: 'popup-code' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('exchanges a popup authorization code and reloads the Drive client for SUPER_ADMIN', async () => {
+      const h = makeController();
+      const res = await h.controller.exchangeGoogleCode(SUPER_ADMIN, {
+        code: 'popup-code',
+        redirectUri: 'https://traveltourism-32d7d.firebaseapp.com/__/auth/handler',
+      });
+
+      expect(h.destinations.connect).toHaveBeenCalledWith(
+        'popup-code',
+        'https://traveltourism-32d7d.firebaseapp.com/__/auth/handler',
+      );
+      expect(h.backups.reloadDriveClient).toHaveBeenCalled();
+      expect(res).toEqual({ accountEmail: 'flyconnect.backups@gmail.com', folderId: 'folder-1' });
+    });
+
+    it('refuses an empty code', async () => {
+      const h = makeController();
+      await expect(h.controller.exchangeGoogleCode(SUPER_ADMIN, { code: '   ' })).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+    });
+  });
 });
+

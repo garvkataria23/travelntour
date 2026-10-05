@@ -202,6 +202,37 @@ export class BackupController {
     }
   }
 
+  /**
+   * Completes a popup-based Google OAuth flow where the browser receives a one-time authorization
+   * code from the project's authorized OAuth handler and hands it to the server for token exchange.
+   */
+  @Post('destination/google/exchange')
+  @RequirePermissions(Permission.BACKUP_CONFIGURE)
+  async exchangeGoogleCode(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { code?: string; redirectUri?: string },
+  ): Promise<{ accountEmail: string; folderId: string }> {
+    this.assertCan(user, Permission.BACKUP_CONFIGURE);
+
+    if (!this.destinations.canStartConnect()) {
+      throw new ServiceUnavailableException({
+        message:
+          'Google Drive OAuth is not configured. Set GOOGLE_DRIVE_CLIENT_ID and GOOGLE_DRIVE_CLIENT_SECRET on the server, then try again.',
+        code: 'OAUTH_CLIENT_NOT_CONFIGURED',
+      });
+    }
+
+    const code = body?.code?.trim();
+    if (!code) {
+      throw new ServiceUnavailableException('Google did not return an authorisation code.');
+    }
+
+    const connected = await this.destinations.connect(code, body?.redirectUri);
+    await this.backups.reloadDriveClient();
+    this.logger.log(`Drive destination connected via popup: ${connected.accountEmail}`);
+    return connected;
+  }
+
   /** Forgets the stored grant. Archives already in Drive are untouched. */
   @Delete('destination/google')
   @RequirePermissions(Permission.BACKUP_CONFIGURE)

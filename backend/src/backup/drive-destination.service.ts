@@ -203,13 +203,17 @@ export class DriveDestinationService implements OnModuleInit {
    * Any previous user destination is marked broken rather than deleted, so an operator can see that
    * one existed and what account it was.
    */
-  async connect(code: string): Promise<{ accountEmail: string; folderId: string }> {
+  async connect(
+    code: string,
+    redirectUriOverride?: string,
+  ): Promise<{ accountEmail: string; folderId: string }> {
+    const effectiveRedirectUri = redirectUriOverride?.trim() || this.redirectUri();
     const probe = new GoogleDriveOAuth(
       this.clientId(),
       this.clientSecret(),
       '',
       undefined,
-      this.redirectUri(),
+      effectiveRedirectUri,
       fetch,
       this.env,
     );
@@ -222,7 +226,7 @@ export class DriveDestinationService implements OnModuleInit {
       this.clientSecret(),
       '',
       undefined,
-      this.redirectUri(),
+      effectiveRedirectUri,
       fetch,
       this.env,
     );

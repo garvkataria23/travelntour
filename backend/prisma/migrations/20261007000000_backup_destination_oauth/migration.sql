@@ -25,20 +25,20 @@
 CREATE TYPE "BackupDestinationStatus" AS ENUM ('ACTIVE', 'BROKEN');
 
 CREATE TABLE "BackupDestination" (
-  "id"                     String   NOT NULL,
-  "kind"                   String   NOT NULL,
-  "accountEmail"           String   NOT NULL,
+  "id"                     TEXT   NOT NULL,
+  "kind"                   TEXT   NOT NULL,
+  "accountEmail"           TEXT   NOT NULL,
 
-  /// Encrypted refresh token for USER_OAUTH, as version.iv.authTag.ciphertext (base64url).
-  /// Null for SERVICE_ACCOUNT, whose key lives in the environment.
-  "refreshTokenCiphertext" String?,
+  -- Encrypted refresh token for USER_OAUTH, as version.iv.authTag.ciphertext (base64url).
+  -- Null for SERVICE_ACCOUNT, whose key lives in the environment.
+  "refreshTokenCiphertext" TEXT,
 
-  "folderId"    String?
-  "status"      "BackupDestinationStatus" NOT NULL DEFAULT 'ACTIVE',
+  "folderId"               TEXT,
+  "status"                 "BackupDestinationStatus" NOT NULL DEFAULT 'ACTIVE',
 
-  "connectedAt" DateTime NOT NULL DEFAULT now(),
-  "lastUsedAt"  DateTime?,
-  "errorMessage" String?,
+  "connectedAt"            TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "lastUsedAt"             TIMESTAMP(3),
+  "errorMessage"           TEXT,
 
   CONSTRAINT "BackupDestination_pkey" PRIMARY KEY ("id")
 );

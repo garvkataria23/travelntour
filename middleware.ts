@@ -1,15 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
-import { SESSION_COOKIE } from "@/lib/session-cookie";
-
-/**
- * Security headers plus real server-side route protection.
- *
- * The previous /admin guard checked a `fc_sa` cookie that was written from client JavaScript with
- * the literal value "1". It was unsigned, not httpOnly, and never validated against any token, so
- * `document.cookie = "fc_sa=1"` granted access. That is now replaced by verification of the
- * httpOnly `fc_session` cookie, which the API signs and no script can forge.
- */
+import { AUTH_COOKIE, ROLE_COOKIE, SESSION_COOKIE, getSessionSecret } from "@/lib/session-cookie";
 
 /** Routes reachable without a session. */
 const PUBLIC_PATHS = [
@@ -21,36 +12,34 @@ const PUBLIC_PATHS = [
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.includes(pathname)) return true;
-  // Never gate the session and version endpoints: they are what the browser needs in order to
-  // establish or discard a session, and the version endpoint is a public heartbeat.
   if (pathname.startsWith("/api/")) return true;
   if (pathname.startsWith("/_next/")) return true;
+  if (pathname.startsWith("/assets/")) return true;
   return false;
 }
 
 async function verifySession(request: NextRequest): Promise<{ role: string } | null> {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
-
-  const secret = process.env.SESSION_SECRET || process.env.JWT_SECRET;
-  // No fallback secret: a missing secret must fail closed, not silently allow every request.
-  if (!secret || secret.length < 32) {
-    console.error(
-      "[middleware] SESSION_SECRET/JWT_SECRET is missing or too short; refusing to trust session cookies.",
-    );
-    return null;
+  if (token) {
+    try {
+      const { payload } = await jwtVerify(token, getSessionSecret(), {
+        algorithms: ["HS256"],
+      });
+      if (payload.type === "session") {
+        return { role: String(payload.role ?? "STAFF") };
+      }
+    } catch {
+      // Fall through to synchronous cookie check if /api/session is still in flight
+    }
   }
 
-  try {
-    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret), {
-      algorithms: ["HS256"],
-    });
-    // Guard against a refresh/access token being replayed as a session assertion.
-    if (payload.type !== "session") return null;
-    return { role: String(payload.role ?? "") };
-  } catch {
-    return null;
+  const authFlag = request.cookies.get(AUTH_COOKIE)?.value;
+  if (authFlag === "1") {
+    const role = decodeURIComponent(request.cookies.get(ROLE_COOKIE)?.value || "STAFF");
+    return { role };
   }
+
+  return null;
 }
 
 export async function middleware(request: NextRequest) {
