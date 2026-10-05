@@ -17,6 +17,7 @@ export interface SendTemplateParams {
   templateName: string;
   language: string;
   bodyVariables: string[];
+  phoneNumberId?: string;
 }
 
 export interface SendDocumentParams {
@@ -24,15 +25,18 @@ export interface SendDocumentParams {
   document: Buffer;
   fileName: string;
   caption?: string;
+  phoneNumberId?: string;
 }
 
 export interface SendTextParams {
   to: string;
   body: string;
+  phoneNumberId?: string;
 }
 
 export interface SendResult {
   waMessageId: string;
+  phoneNumberId?: string;
 }
 
 const META_ERROR_CODES: Record<number, { code: string; retryable: boolean }> = {
@@ -58,8 +62,49 @@ export class WhatsAppService {
     return process.env.WHATSAPP_MOCK === 'true';
   }
 
+  /**
+   * Resolves the sender Phone Number ID:
+   * 1. Explicit per-call override (`params.phoneNumberId`: 'primary' | 'secondary' | '<id>')
+   * 2. `WHATSAPP_ACTIVE_SENDER` ('primary' | 'secondary' | '<id>') if set
+   * 3. Default `WHATSAPP_PHONE_NUMBER_ID` (primary number: 1372700039251498)
+   */
+  resolvePhoneNumberId(override?: string): string {
+    const primary = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+    const secondary = process.env.WHATSAPP_SECONDARY_PHONE_NUMBER_ID || '';
+    const target = (override || process.env.WHATSAPP_ACTIVE_SENDER || 'primary').trim();
+
+    if (target.toLowerCase() === 'secondary' && secondary) {
+      return secondary;
+    }
+    if (target.toLowerCase() === 'primary') {
+      return primary;
+    }
+    if (/^\d+$/.test(target)) {
+      return target;
+    }
+    return primary;
+  }
+
+  resolveAccessToken(resolvedPhoneId?: string): string {
+    const secondaryId = process.env.WHATSAPP_SECONDARY_PHONE_NUMBER_ID || '';
+    const secondaryToken = process.env.WHATSAPP_SECONDARY_ACCESS_TOKEN || '';
+    if (resolvedPhoneId && secondaryId && resolvedPhoneId === secondaryId && secondaryToken) {
+      return secondaryToken;
+    }
+    return process.env.WHATSAPP_ACCESS_TOKEN || '';
+  }
+
+  get availableSenderIds(): { primary: string; secondary: string; active: string } {
+    return {
+      primary: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+      secondary: process.env.WHATSAPP_SECONDARY_PHONE_NUMBER_ID || '',
+      active: this.resolvePhoneNumberId(),
+    };
+  }
+
   get configured(): boolean {
-    return Boolean(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
+    const phoneId = this.resolvePhoneNumberId();
+    return Boolean(this.resolveAccessToken(phoneId) && phoneId);
   }
 
   async sendTemplate(params: SendTemplateParams): Promise<SendResult> {
@@ -67,7 +112,9 @@ export class WhatsAppService {
       await new Promise((resolve) => setTimeout(resolve, 150));
       return { waMessageId: `mock_${Math.random().toString(36).slice(2, 12)}` };
     }
-    if (!this.configured) {
+    const phoneNumberId = this.resolvePhoneNumberId(params.phoneNumberId);
+    const token = this.resolveAccessToken(phoneNumberId);
+    if (!token || !phoneNumberId) {
       throw new WhatsAppApiError(
         'NOT_CONFIGURED',
         'WhatsApp API is not configured. Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID or enable WHATSAPP_MOCK.',
@@ -75,42 +122,63 @@ export class WhatsAppService {
       );
     }
 
-    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID!;
     const url = `https://graph.facebook.com/${this.apiVersion}/${phoneNumberId}/messages`;
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: params.to,
-          type: 'template',
-          template: {
-            name: params.templateName,
-            language: { code: params.language },
-            components: [
-              {
-                type: 'body',
-                parameters: params.bodyVariables.map((value) => ({ type: 'text', text: String(value) })),
-              },
-            ],
+    const sendAttempt = async (tplName: string, lang: string): Promise<Response> => {
+      try {
+        return await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
           },
-        }),
-      });
-    } catch (error) {
-      throw new WhatsAppApiError(
-        'NETWORK_ERROR',
-        `Failed to reach WhatsApp API: ${error instanceof Error ? error.message : String(error)}`,
-        true,
-      );
-    }
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            to: params.to,
+            type: 'template',
+            template: {
+              name: tplName,
+              language: { code: lang },
+              components: [
+                {
+                  type: 'body',
+                  parameters: params.bodyVariables.map((value) => ({ type: 'text', text: String(value) })),
+                },
+              ],
+            },
+          }),
+        });
+      } catch (error) {
+        throw new WhatsAppApiError(
+          'NETWORK_ERROR',
+          `Failed to reach WhatsApp API: ${error instanceof Error ? error.message : String(error)}`,
+          true,
+        );
+      }
+    };
 
-    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    let response = await sendAttempt(params.templateName, params.language);
+    let body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+    if (!response.ok && Number((body.error as Record<string, unknown> | undefined)?.code) === 132001) {
+      const candidates: Array<{ name: string; lang: string }> = [];
+      const altLang = params.language === 'en' ? 'en_US' : params.language === 'en_US' ? 'en' : null;
+      if (altLang) {
+        candidates.push({ name: params.templateName, lang: altLang });
+      }
+      if (params.templateName === 'booking_confirm_enus') {
+        candidates.push({ name: 'booking_confirmation', lang: 'en_US' }, { name: 'booking_confirmation', lang: 'en' });
+      } else if (params.templateName === 'booking_confirmation') {
+        candidates.push({ name: 'booking_confirm_enus', lang: 'en_US' });
+      }
+      for (const cand of candidates) {
+        response = await sendAttempt(cand.name, cand.lang);
+        body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        if (response.ok || Number((body.error as Record<string, unknown> | undefined)?.code) !== 132001) {
+          break;
+        }
+      }
+    }
 
     if (!response.ok) {
       this.throwMetaError(body, response.status, response.headers);
@@ -121,7 +189,7 @@ export class WhatsAppService {
     if (!waMessageId) {
       throw new WhatsAppApiError('INVALID_RESPONSE', 'WhatsApp API returned no message id', false);
     }
-    return { waMessageId };
+    return { waMessageId, phoneNumberId };
   }
 
   async sendText(params: SendTextParams): Promise<SendResult> {
@@ -129,7 +197,9 @@ export class WhatsAppService {
       await new Promise((resolve) => setTimeout(resolve, 150));
       return { waMessageId: `mock_${Math.random().toString(36).slice(2, 12)}` };
     }
-    if (!this.configured) {
+    const phoneNumberId = this.resolvePhoneNumberId(params.phoneNumberId);
+    const token = this.resolveAccessToken(phoneNumberId);
+    if (!token || !phoneNumberId) {
       throw new WhatsAppApiError(
         'NOT_CONFIGURED',
         'WhatsApp API is not configured. Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID or enable WHATSAPP_MOCK.',
@@ -137,7 +207,6 @@ export class WhatsAppService {
       );
     }
 
-    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID!;
     const url = `https://graph.facebook.com/${this.apiVersion}/${phoneNumberId}/messages`;
 
     let response: Response;
@@ -145,7 +214,7 @@ export class WhatsAppService {
       response = await fetch(url, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -174,7 +243,7 @@ export class WhatsAppService {
     if (!waMessageId) {
       throw new WhatsAppApiError('INVALID_RESPONSE', 'WhatsApp API returned no message id', false);
     }
-    return { waMessageId };
+    return { waMessageId, phoneNumberId };
   }
 
   async sendDocument(params: SendDocumentParams): Promise<SendResult> {
@@ -182,7 +251,9 @@ export class WhatsAppService {
       await new Promise((resolve) => setTimeout(resolve, 150));
       return { waMessageId: `mock_${Math.random().toString(36).slice(2, 12)}` };
     }
-    if (!this.configured) {
+    const phoneNumberId = this.resolvePhoneNumberId(params.phoneNumberId);
+    const token = this.resolveAccessToken(phoneNumberId);
+    if (!token || !phoneNumberId) {
       throw new WhatsAppApiError(
         'NOT_CONFIGURED',
         'WhatsApp API is not configured. Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID or enable WHATSAPP_MOCK.',
@@ -190,7 +261,6 @@ export class WhatsAppService {
       );
     }
 
-    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID!;
     const baseUrl = `https://graph.facebook.com/${this.apiVersion}/${phoneNumberId}`;
 
     // Step 1: upload the document to obtain a media id.
@@ -203,7 +273,7 @@ export class WhatsAppService {
       form.append('file', blob, params.fileName);
       const uploadRes = await fetch(`${baseUrl}/media`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}` },
+        headers: { Authorization: `Bearer ${token}` },
         body: form,
       });
       uploadBody = (await uploadRes.json().catch(() => ({}))) as Record<string, unknown>;
@@ -230,7 +300,7 @@ export class WhatsAppService {
       response = await fetch(`${baseUrl}/messages`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
