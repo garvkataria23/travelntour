@@ -750,7 +750,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   {
     id: "cust-1",
     name: "Rahul Sharma",
-    phone: "+971 50 123 4567",
+    phone: "+91 90828 64488",
     email: "rahul.sharma@gmail.com",
     nationality: "India",
     passportNumber: "M9283710",
@@ -948,7 +948,22 @@ export function getStoredCustomers(): Customer[] {
       localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(INITIAL_CUSTOMERS));
       return INITIAL_CUSTOMERS;
     }
-    return JSON.parse(raw);
+    const parsed: Customer[] = JSON.parse(raw);
+    let migrated = false;
+    const updated = parsed.map((c) => {
+      if (
+        (c.id === "cust-1" || c.name === "Rahul Sharma") &&
+        (c.phone === "+971 50 123 4567" || c.phone === "+971501234567")
+      ) {
+        migrated = true;
+        return { ...c, phone: "+91 90828 64488" };
+      }
+      return c;
+    });
+    if (migrated) {
+      localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(updated));
+    }
+    return updated;
   } catch {
     return INITIAL_CUSTOMERS;
   }

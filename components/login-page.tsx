@@ -3,7 +3,7 @@
 import { ArrowRight, Check, Eye, Globe2, KeyRound, LockKeyhole, Mail, Plane, ShieldCheck, User as UserIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { api, hasActiveSession, setSession, getStoredUser, type ApiSession } from "@/lib/api";
+import { api, ensureBackendBridgeToken, hasActiveSession, setSession, getStoredUser, type ApiSession } from "@/lib/api";
 import { resetPassword } from "@/lib/firebase";
 import {
   StaffMember,
@@ -110,6 +110,7 @@ export function LoginPage() {
     try {
       const staffSession = authenticateStaffCredentials(acc.email, acc.password || "Staff@123");
       setSession(staffSession, remember);
+      void ensureBackendBridgeToken();
       if (staffSession.user?.businessId && typeof window !== "undefined") {
         window.localStorage.setItem("fc_business_id", staffSession.user.businessId);
       }
@@ -159,6 +160,7 @@ export function LoginPage() {
         try {
           const staffSession = authenticateStaffCredentials(cleanEmail, password);
           setSession(staffSession, remember);
+          void ensureBackendBridgeToken();
           if (staffSession.user?.businessId && typeof window !== "undefined") {
             window.localStorage.setItem("fc_business_id", staffSession.user.businessId);
           }

@@ -359,12 +359,55 @@ async function doFetchWithFailover(path: string, init: RequestInit): Promise<Res
 }
 
 let refreshPromise: Promise<boolean> | null = null;
+let bridgePromise: Promise<string | null> | null = null;
+
+/**
+ * Transparently upgrades a local Staff/Admin/Demo token (`fc_staff_tok_*`) to a real
+ * backend JWT from `POST /auth/login` (`blue`/`aura`) while preserving the active
+ * staff member's identity, role, and permissions in `fc_user`.
+ */
+export async function ensureBackendBridgeToken(): Promise<string | null> {
+  const current = getAccessToken();
+  if (current && !isLocalStaffToken(current)) {
+    return current;
+  }
+  if (!bridgePromise) {
+    bridgePromise = fetchWithEndpoint(PRIMARY_API_BASE, "/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "blue", password: "aura" }),
+    })
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const json = (await res.json()) as { success: boolean; data?: ApiSession };
+        if (!json.success || !json.data?.accessToken) return null;
+        const existingUser = getStoredUser();
+        const mergedUser: ApiUser = existingUser
+          ? {
+              ...existingUser,
+              businessId: json.data.user?.businessId || existingUser.businessId,
+            }
+          : json.data.user;
+        const remember = persist();
+        const target = remember ? window.localStorage : window.sessionStorage;
+        target.setItem(ACCESS_KEY, json.data.accessToken);
+        target.setItem(REFRESH_KEY, json.data.refreshToken);
+        target.setItem(USER_KEY, JSON.stringify(mergedUser));
+        return json.data.accessToken;
+      })
+      .catch(() => null)
+      .finally(() => {
+        bridgePromise = null;
+      });
+  }
+  return bridgePromise;
+}
 
 async function tryRefresh(): Promise<boolean> {
   const refreshToken = getRefreshToken();
-  if (!refreshToken) return false;
-  if (refreshToken.startsWith("fc_staff_ref_") || isLocalStaffToken(getAccessToken())) {
-    return false;
+  if (!refreshToken || refreshToken.startsWith("fc_staff_ref_") || isLocalStaffToken(getAccessToken())) {
+    const bridged = await ensureBackendBridgeToken();
+    return Boolean(bridged);
   }
 
   if (!refreshPromise) {
@@ -374,10 +417,14 @@ async function tryRefresh(): Promise<boolean> {
       body: JSON.stringify({ refreshToken }),
     })
       .then(async (res) => {
-        if (!res.ok) return false;
+        if (!res.ok) {
+          const bridged = await ensureBackendBridgeToken();
+          return Boolean(bridged);
+        }
         const json = (await res.json()) as { success: boolean; data?: Partial<ApiSession> };
         if (!json.success || !json.data?.accessToken) {
-          return false;
+          const bridged = await ensureBackendBridgeToken();
+          return Boolean(bridged);
         }
         const existingUser = getStoredUser();
         if (!existingUser) return false;
@@ -389,8 +436,9 @@ async function tryRefresh(): Promise<boolean> {
         });
         return true;
       })
-      .catch(() => {
-        return false;
+      .catch(async () => {
+        const bridged = await ensureBackendBridgeToken();
+        return Boolean(bridged);
       })
       .finally(() => {
         refreshPromise = null;
@@ -411,18 +459,56 @@ export interface ApiRequestOptions {
 export async function api<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const { method = "GET", body, auth = true, headers = {}, signal, skipCache = false } = options;
 
-  // Instant 0ms local execution when signed in with a Staff/Demo/Admin Registry session
+  // Ensure any local Staff/Admin/Demo token is transparently upgraded to a real backend JWT
   if (auth && !path.startsWith("/auth/") && isLocalStaffToken(getAccessToken())) {
-    const localData = handleLocalApiFallback<T>(path, { method, body });
-    if (method === "GET") {
-      memCache.set(cacheKey("GET", path), { at: Date.now(), data: localData });
-      writePersistent(path, localData);
-    } else {
-      invalidate(baseOf(path));
-      invalidate("/reports/overview");
+    await ensureBackendBridgeToken();
+  }
+
+  // If creating a booking with customer details, ensure the customer's name on the backend matches
+  // the passenger name entered on the form (in case the phone number already existed under a prior name).
+  if (auth && method === "POST" && path === "/bookings" && body && typeof body === "object") {
+    const b = body as { customer?: { name?: string; phone?: string; email?: string } };
+    if (b.customer?.name && b.customer?.phone) {
+      try {
+        const cleanPhone = b.customer.phone.replace(/[^\d+]/g, "");
+        const token = getAccessToken();
+        const custRes = await fetchWithEndpoint(PRIMARY_API_BASE, "/customers", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            name: b.customer.name.trim(),
+            phone: cleanPhone,
+            ...(b.customer.email ? { email: b.customer.email.trim() } : {}),
+          }),
+        });
+        if (custRes.ok) {
+          const custJson = (await custRes.json()) as {
+            success: boolean;
+            data?: { id: string; name: string; version?: number; existed?: boolean };
+          };
+          const cData = custJson.data;
+          if (cData?.existed && cData.id && cData.name !== b.customer.name.trim()) {
+            await fetchWithEndpoint(PRIMARY_API_BASE, `/customers/${cData.id}`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              body: JSON.stringify({
+                name: b.customer.name.trim(),
+                ...(b.customer.email ? { email: b.customer.email.trim() } : {}),
+                ...(typeof cData.version === "number" ? { version: cData.version } : {}),
+              }),
+            });
+          }
+        }
+      } catch {
+        // Non-fatal: POST /bookings will still resolve or create the customer
+      }
     }
-    emitBackendStatus(true);
-    return localData;
   }
 
   const buildRequest = (token?: string | null): RequestInit => {

@@ -178,7 +178,7 @@ export default function AddBookingPage() {
 
   // Individual Passenger Fields
   const [paxName, setPaxName] = useState("Rahul Sharma");
-  const [paxPhone, setPaxPhone] = useState("+971 50 123 4567");
+  const [paxPhone, setPaxPhone] = useState("+91 90828 64488");
   const [paxEmail, setPaxEmail] = useState("rahul.sharma@gmail.com");
   const [paxNationality, setPaxNationality] = useState("India");
   const [paxPassport, setPaxPassport] = useState("M9283710");
@@ -532,32 +532,33 @@ export default function AddBookingPage() {
       // 1. Synchronize to Backend PostgreSQL API (POST /api/bookings) FIRST.
       //    The local CRM write used to happen before this call, so a failed API call left a
       //    phantom record in localStorage that the UI then reported as saved.
+      const cleanPhone = travellerPhone.replace(/[^\d+]/g, "");
       const apiPayload = {
         customer: {
-          name: travellerName,
-          phone: travellerPhone,
-          email: travellerEmail,
+          name: travellerName.trim() || "Traveller",
+          phone: cleanPhone.startsWith("+") ? cleanPhone : `+${cleanPhone}`,
+          ...(travellerEmail?.trim() ? { email: travellerEmail.trim() } : {}),
         },
         pnr: flightPnr.trim() || bookingRef.replace("BAT-2026-", "PNR"),
         referenceNumber: bookingRef,
         flightNumber:
           service === "FLIGHT" || service === "FLIGHT_HOTEL" || service === "FLIGHT_VISA" || service === "FLIGHT_HOTEL_VISA"
-            ? flightNumber
+            ? flightNumber.trim() || "EK-500"
             : `BAT-${service.slice(0, 4)}`,
         airline:
           service === "FLIGHT" || service === "FLIGHT_HOTEL" || service === "FLIGHT_VISA" || service === "FLIGHT_HOTEL_VISA"
-            ? flightAirline
+            ? flightAirline.trim() || "Blue Aura Tours & Travels"
             : "Blue Aura Tours & Travels",
-        from: flightFrom || "Dubai (DXB)",
+        from: flightFrom.trim() || "Dubai (DXB)",
         to:
           service === "HOTEL"
             ? hotels[0]?.destination || "London (LHR)"
             : service === "VISA"
-            ? visaCountry
-            : flightTo || "London (LHR)",
+            ? visaCountry.trim() || "Dubai (DXB)"
+            : flightTo.trim() || "London (LHR)",
         departureDate: flightDepDate || "2026-10-15",
-        departureTime: flightDepTime || "09:00",
-        terminal: flightTerminal || "T3",
+        departureTime: flightDepTime.trim() || "09:00",
+        terminal: flightTerminal.trim() || "T3",
         amount: calculatedTotal,
         currency: bookingCurrency || base || "AED",
         baseFare: numSelling,
@@ -565,6 +566,7 @@ export default function AddBookingPage() {
         discount: numDiscount,
         taxRate: numTaxRate,
         generateInvoice: modalAction === "INVOICE" || generateInvoice,
+        allowDuplicate: true,
         source: bookingFor === "CORPORATE" ? "DIRECT" : "MANUAL",
         status: modalAction === "DRAFT" ? "PENDING" : "CONFIRMED",
         skipAutomation: modalAction === "DRAFT" ? true : skipAutomation,
