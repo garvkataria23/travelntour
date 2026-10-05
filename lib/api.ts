@@ -614,48 +614,6 @@ export async function api<T>(path: string, options: ApiRequestOptions = {}): Pro
     invalidate(baseOf(path));
     invalidate("/reports/overview");
 
-    // When a booking is created, also dispatch a free-form WhatsApp confirmation text (`POST /messages`)
-    // so that if Meta's template billing check (`131042`) blocks the paid UTILITY template, the customer
-    // still receives the full booking confirmation over the 24-hour free service window.
-    if (method === "POST" && path === "/bookings" && data && typeof data === "object") {
-      const bk = data as Record<string, any>;
-      const reqBody = body && typeof body === "object" ? (body as Record<string, any>) : {};
-      if (!reqBody.skipAutomation && bk.id && bk.customerId) {
-        const custName = bk.customerName || reqBody.customer?.name || "Traveller";
-        const pnr = bk.pnr || reqBody.pnr || "—";
-        const flight = bk.flightNumber || reqBody.flightNumber || "—";
-        const from = bk.fromAirport || reqBody.from || "—";
-        const to = bk.toAirport || reqBody.to || "—";
-        const depDate = bk.departureDate ? String(bk.departureDate).slice(0, 10) : reqBody.departureDate || "—";
-        const depTime = bk.departureTime || reqBody.departureTime || "—";
-        const term = bk.terminal || reqBody.terminal || "";
-        const textMsg =
-          `Hi ${custName} 👋\n\n` +
-          `Your flight booking has been confirmed! ✈️\n\n` +
-          `🧾 PNR: ${pnr}\n` +
-          `✈️ Flight: ${flight}\n` +
-          `🛫 From: ${from}\n` +
-          `🛬 To: ${to}\n` +
-          `🗓️ Date: ${depDate}\n` +
-          `⏱️ Time: ${depTime}` +
-          (term ? `\nTerminal: ${term}` : "") +
-          `\n\nWe wish you a safe and pleasant journey! 😊\nTeam Blue Aura Tourism`;
-        const tok = getAccessToken();
-        void fetchWithEndpoint(PRIMARY_API_BASE, "/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
-          },
-          body: JSON.stringify({
-            customerId: bk.customerId,
-            bookingId: bk.id,
-            text: textMsg,
-          }),
-        }).catch(() => undefined);
-      }
-    }
-
     if (typeof window !== "undefined") {
       import("./sync")
         .then(({ broadcastLiveSync }) => {
