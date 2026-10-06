@@ -161,7 +161,10 @@ export class WhatsAppService {
     let response = await sendAttempt(params.templateName, params.language);
     let body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
-    if (!response.ok && Number((body.error as Record<string, unknown> | undefined)?.code) === 132001) {
+    const getErrCode = (b: Record<string, unknown>) =>
+      Number((b.error as Record<string, unknown> | undefined)?.code);
+
+    if (!response.ok && getErrCode(body) === 132001) {
       const candidates: Array<{ name: string; lang: string }> = [];
       const altLang = params.language === 'en' ? 'en_US' : params.language === 'en_US' ? 'en' : null;
       if (altLang) {
@@ -175,27 +178,28 @@ export class WhatsAppService {
       for (const cand of candidates) {
         response = await sendAttempt(cand.name, cand.lang);
         body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-        if (response.ok || Number((body.error as Record<string, unknown> | undefined)?.code) !== 132001) {
+        if (response.ok || getErrCode(body) !== 132001) {
           break;
         }
       }
+    }
 
-      // If secondary WABA templates are still PENDING Meta approval (132001),
-      // fall back to primary sender if configured so customer messages are never dropped.
-      const primaryId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
-      const primaryToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
-      if (
-        !response.ok &&
-        Number((body.error as Record<string, unknown> | undefined)?.code) === 132001 &&
-        primaryId &&
-        primaryToken &&
-        phoneNumberId !== primaryId &&
-        process.env.WHATSAPP_DISABLE_PRIMARY_FALLBACK !== 'true'
-      ) {
-        usedPhoneNumberId = primaryId;
-        response = await sendAttempt(params.templateName, params.language, primaryId, primaryToken);
-        body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-      }
+    // If secondary WABA templates (132001) or WhatsApp-provided +1 555 display name (131037)
+    // are still pending Meta review, fall back to primary sender so customer messages are delivered.
+    const primaryId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+    const primaryToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
+    const codeAfterSecondary = getErrCode(body);
+    if (
+      !response.ok &&
+      (codeAfterSecondary === 132001 || codeAfterSecondary === 131037) &&
+      primaryId &&
+      primaryToken &&
+      phoneNumberId !== primaryId &&
+      process.env.WHATSAPP_DISABLE_PRIMARY_FALLBACK !== 'true'
+    ) {
+      usedPhoneNumberId = primaryId;
+      response = await sendAttempt(params.templateName, params.language, primaryId, primaryToken);
+      body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     }
 
     if (!response.ok) {
